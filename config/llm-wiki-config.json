@@ -1,5 +1,5 @@
 {
-  "openai_api_key": "ark-34ec07f5-71c4-49cd-99c6-7a116b51f768-67894",
+  "openai_api_key": "你的apikey",
   "openai_base_url": "https://ark.cn-beijing.volces.com/api/v3",
   "openai_model": "glm-4-7-251222"
 }
