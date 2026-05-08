@@ -5,44 +5,30 @@ description: Use when the user asks to run wiki-health for a KB, re-check struct
 
 # Wiki Health
 
-## Purpose
+## 触发场景（自然语言）
 
-Run deterministic structural health checks against a remote OpenViking knowledge base.
+当用户表达以下意图时使用：
 
-This skill verifies that the remote KB under:
+- “执行 wiki-health”
+- “检查结构是否完整”
+- “ingest 后再做一次健康检查”
 
-`viking://resources/<kb>/`
+## 职责边界（不要做什么）
 
-has the expected wiki structure and that key root pages are valid.
+- 只做结构完整性检查（目录、根页面、索引链接、source-log 覆盖）
+- 不调用 LLM，不做总结与润色
+- 不执行 ingest/query/lint/graph
 
-## What this checks
+## 执行方式
 
-- required directories exist
-- required root pages exist
-- key root pages are not empty
-- links referenced by `wiki/index.md` point to real files
-- source pages are reflected in `wiki/log.md`
-
-## How to run
-
-Use the helper script:
+必须使用本 skill 自带脚本（可在任意目录执行）：
 
 ```bash
-python3 -m scripts.wiki_health_remote --kb-name <kb-name> --pretty
+bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name <kb-name> --pretty
 ```
 
-## Example
+## 强约束
 
-```bash
-python3 -m scripts.wiki_health_remote --kb-name my-kb --pretty
-```
-
-## Expected behavior
-- If the KB is healthy, the script returns status ok
-- If required structure is missing or broken, it returns status error
-- Warnings are returned for softer issues such as missing source log coverage
-
-## Notes
-- This is a deterministic structural check only
-- It does not call an LLM
-- It operates directly against the remote OpenViking storage
+- 不要调用项目根目录 `scripts/` 下的命令
+- 不要使用项目级 `scripts` 模块调用方式
+- 不要要求用户 clone 项目

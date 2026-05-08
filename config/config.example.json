@@ -1,0 +1,8 @@
+{
+  "openviking_url": "http://openviking.company.com",
+  "openviking_api_key": "",
+  "openviking_timeout": 30,
+  "openai_base_url": "http://company-llm-gateway/v1",
+  "openai_api_key": "",
+  "openai_model": "company-default-model"
+}

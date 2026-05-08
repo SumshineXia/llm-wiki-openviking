@@ -5,74 +5,50 @@ description: Use when the user asks natural-language Q&A over a remote KB wiki, 
 
 # Wiki Query
 
-## Purpose
+## 触发场景（自然语言）
 
-Answer a natural-language question using the remote OpenViking-backed wiki namespace.
+当用户表达以下意图时使用：
 
-This skill reads relevant pages from:
+- “基于 my-kb 回答这个问题”
+- “执行 wiki-query”
+- “把刚才答案保存为 synthesis”
 
-`viking://resources/<kb>/wiki/`
+## 职责边界（不要做什么）
 
-and produces a grounded answer.
+- 只处理问答（query），可选保存 synthesis
+- 不做 ingest、不上传 source、不做 health/lint/graph
+- 不修改与本次问答无关的 wiki 页面
 
-It can also optionally save the answer into:
+## 执行方式
 
-`wiki/syntheses/`
-
-## Preconditions
-
-Before running this skill:
-
-1. The remote knowledge base must already be bootstrapped
-2. At least one source should already have been ingested into the wiki
-3. Environment variables or config for an OpenAI-compatible model must be available:
-   - `OPENAI_API_KEY`
-   - `OPENAI_BASE_URL` (optional)
-   - `OPENAI_MODEL` (optional)
-
-## How to run
+必须使用本 skill 自带脚本（可在任意目录执行）：
 
 ```bash
-python3 -m scripts.wiki_query_remote \
+bash ~/.config/opencode/skills/wiki-query/scripts/run.sh \
   --kb-name <kb-name> \
   --question "<your question>" \
   --pretty
 ```
-## Example
+
+保存为 synthesis：
 
 ```bash
-python3 -m scripts.wiki_query_remote \
-  --kb-name my-kb \
-  --question "OpenViking 是什么？它和传统知识库有什么区别？" \
-  --pretty
-```
-
-## Save a synthesis page
-
-Use --save to persist the answer into wiki/syntheses/:
-
-```bash
-python3 -m scripts.wiki_query_remote \
-  --kb-name my-kb \
-  --question "OpenViking 是什么？它和传统知识库有什么区别？" \
+bash ~/.config/opencode/skills/wiki-query/scripts/run.sh \
+  --kb-name <kb-name> \
+  --question "<your question>" \
   --save \
+  --slug <optional-slug> \
   --pretty
 ```
-Optional custom synthesis slug:
 
-```bash
-python3 -m scripts.wiki_query_remote \
-  --kb-name my-kb \
-  --question "OpenViking 是什么？它和传统知识库有什么区别？" \
-  --save \
-  --slug openviking-overview \
-  --pretty
-```
-## Notes
+## 回答后默认追问
 
-1. This script selects candidate pages from the remote wiki first
-2. Then it uses an LLM to synthesize a grounded answer
-3. When --save is used, it updates:
-   - wiki/syntheses/*.md
-   - wiki/index.md
-   - wiki/log.md
+- 每次成功返回问答结果后，默认追加一句：`是否保存为 synthesis？`
+- 若用户同意保存，则执行带 `--save` 的命令
+- 若用户提供名称，则追加 `--slug <slug>`
+
+## 强约束
+
+- 不要调用项目根目录 `scripts/` 下的命令
+- 不要使用项目级 `scripts` 模块调用方式
+- 不要要求用户 clone 项目

@@ -1,54 +1,34 @@
 ---
 name: wiki-graph
-description: Use when the user asks to generate or refresh remote wiki graph artifacts, including graph.json and graph.html under viking://resources/<kb>/graph/. Trigger phrases include "为 my-kb 生成 wiki graph", "执行 wiki-graph", "构建 graph.json 和 graph.html", and "先 dry-run 再生成 graph 文件".
+description: Use when the user asks to generate or refresh remote wiki graph artifacts, including graph.json and graph.html under viking://resources/<kb>/wiki/graph/. Trigger phrases include "为 my-kb 生成 wiki graph", "执行 wiki-graph", "构建 graph.json 和 graph.html", and "先 dry-run 再生成 graph 文件".
 ---
 
 # Wiki Graph
 
-## Purpose
+## 触发场景（自然语言）
 
-Build a deterministic explicit-link graph from the remote OpenViking wiki namespace.
+当用户表达以下意图时使用：
 
-This skill scans pages under:
+- “为 my-kb 生成 wiki graph”
+- “构建 graph.json 和 graph.html”
+- “执行 wiki-graph”
 
-`viking://resources/<kb>/wiki/`
+## 职责边界（不要做什么）
 
-extracts internal links, and writes graph artifacts to:
+- 只负责生成图谱产物（`graph.json`、`graph.html`）
+- 不调用 LLM
+- 不执行 bootstrap/ingest/query/health/lint
 
-- `graph/graph.json`
-- `graph/graph.html`
+## 执行方式
 
-## What this graph contains
-
-- nodes: wiki markdown pages
-- edges: explicit internal links such as `[[...]]` and markdown links
-
-## How to run
+必须使用本 skill 自带脚本（可在任意目录执行）：
 
 ```bash
-python3 -m scripts.wiki_graph_remote --kb-name <kb-name> --pretty
+bash ~/.config/opencode/skills/wiki-graph/scripts/run.sh --kb-name <kb-name> --pretty
 ```
 
-## Example
+## 强约束
 
-```bash
-python3 -m scripts.wiki_graph_remote --kb-name my-kb --pretty
-```
-
-## Dry run
-
-```bash
-python3 -m scripts.wiki_graph_remote --kb-name my-kb --dry-run --pretty
-```
-
-## Include root pages
-By default, index.md, overview.md, and log.md are excluded.
-
-```bash
-python3 -m scripts.wiki_graph_remote --kb-name my-kb --include-root-pages --pretty
-```
-
-## Notes
-- This is a deterministic graph build
-- It does not call an LLM
-- It writes final graph artifacts back to remote OpenViking storage
+- 不要调用项目根目录 `scripts/` 下的命令
+- 不要使用项目级 `scripts` 模块调用方式
+- 不要要求用户 clone 项目

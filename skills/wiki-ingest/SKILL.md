@@ -5,66 +5,43 @@ description: Use when the user asks to ingest a remote raw source into wiki page
 
 # Wiki Ingest
 
-## Purpose
+## 触发场景（自然语言）
 
-Ingest one remote raw source from OpenViking into the wiki namespace of the same knowledge base.
+当用户表达以下意图时使用：
 
-This skill reads a source under:
+- “把 raw/*.md ingest 成 wiki 页面”
+- “对这个 source 做远端 ingest”
+- “更新 index/overview/log”
 
-`viking://resources/<kb>/raw/...`
+## 职责边界（不要做什么）
 
-and generates or updates:
+- 只处理 ingest：从 `raw/` 生成或更新 wiki 页面
+- 不回答问答请求（query）
+- 不做 health/lint/graph，不上传本地文件
 
-- `wiki/sources/*.md`
-- `wiki/entities/*.md`
-- `wiki/concepts/*.md`
-- `wiki/index.md`
-- `wiki/overview.md`
-- `wiki/log.md`
+## 执行方式
 
-## Preconditions
-
-Before running this skill:
-
-1. The remote knowledge base must already be bootstrapped
-2. The source file must already exist under `raw/`
-3. Environment variables for an OpenAI-compatible model must be available:
-   - `OPENAI_API_KEY`
-   - `OPENAI_BASE_URL` (optional)
-   - `OPENAI_MODEL` (optional)
-
-## How to run
+必须使用本 skill 自带脚本（可在任意目录执行）：
 
 ```bash
-python3 -m scripts.wiki_ingest_remote \
+bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
   --kb-name <kb-name> \
   --source-uri <full-raw-source-uri> \
   --pretty
 ```
 
-## Example
+仅预览（不写入）：
 
 ```bash
-python3 -m scripts.wiki_ingest_remote \
-  --kb-name my-kb \
-  --source-uri viking://resources/my-kb/raw/openviking-notes.md \
-  --pretty
-```
-
-
-## Dry run
-
-Use --dry-run to preview the write plan without writing:
-
-```bash
-python3 -m scripts.wiki_ingest_remote \
-  --kb-name my-kb \
-  --source-uri viking://resources/my-kb/raw/openviking-notes.md \
+bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
+  --kb-name <kb-name> \
+  --source-uri <full-raw-source-uri> \
   --dry-run \
   --pretty
 ```
 
-## Notes
-- This script uses an LLM to generate page content
-- It writes directly to remote OpenViking storage
-- It is the first real content-producing workflow in the remote wiki pipeline
+## 强约束
+
+- 不要调用项目根目录 `scripts/` 下的命令
+- 不要使用项目级 `scripts` 模块调用方式
+- 不要要求用户 clone 项目
