@@ -28,6 +28,8 @@ description: 当用户要求对 KB 执行 wiki-health（检查远端 wiki 结构
 bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name <kb-name> --pretty
 ```
 
+可选参数：`--config <path>`、`--profile <name>`。
+
 ## 强约束
 
 - 不要调用项目根目录 `scripts/` 下的命令

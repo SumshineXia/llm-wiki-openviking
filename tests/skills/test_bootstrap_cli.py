@@ -16,6 +16,7 @@ module = module_from_spec(spec)
 spec.loader.exec_module(module)
 plan_bootstrap_paths = module.plan_bootstrap_paths
 build_initial_file_content = module.build_initial_file_content
+parse_args = module.parse_args
 
 
 def test_plan_bootstrap_paths_contains_required_dirs_and_files() -> None:
@@ -74,3 +75,24 @@ def test_build_initial_file_content_uses_chinese_root_templates() -> None:
 
   assert overview_content.startswith("# 概览")
   assert log_content.startswith("# 操作日志")
+
+
+def test_parse_args_supports_config_and_profile(monkeypatch) -> None:
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "bootstrap.py",
+      "--kb-name",
+      "team-a/project-x/wiki-kb",
+      "--config",
+      "/tmp/config.json",
+      "--profile",
+      "p1",
+    ],
+  )
+
+  args = parse_args()
+
+  assert args.config == "/tmp/config.json"
+  assert args.profile == "p1"

@@ -31,6 +31,8 @@ bash ~/.config/opencode/skills/wiki-query/scripts/run.sh \
   --pretty
 ```
 
+可选参数：`--config <path>`、`--profile <name>`。
+
 保存为 synthesis：
 
 ```bash

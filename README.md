@@ -31,6 +31,7 @@
 - `skills/wiki-query` -> `~/.config/opencode/skills/wiki-query`
 - `skills/wiki-lint` -> `~/.config/opencode/skills/wiki-lint`
 - `skills/wiki-graph` -> `~/.config/opencode/skills/wiki-graph`
+- `skills/wiki-profile` -> `~/.config/opencode/skills/wiki-profile`
 
 如果你只想用部分能力，也可以只复制对应 skill。
 
@@ -38,11 +39,18 @@
 
 ## 配置
 
+推荐流程：
+
+1. 在 AIHub 复制单系统完整 `config.json`。
+2. 用户手工把多个系统合并为 `profiles[]`（`version: 2`）配置。
+3. 用 `wiki-profile use/current` 选择并确认当前 profile。
+4. 在 OpenCode 里直接用自然语言执行 wiki-bootstrap/health/ingest/query/lint/graph。
+
 创建或修改配置文件：
 
 `~/.config/llm-wiki-openviking/config.json`
 
-示例：
+示例（单 profile 简化版）：
 
 ```json
 {
@@ -59,6 +67,14 @@
 
 - `openviking_url` 可访问
 - `openai_api_key`（或你实际使用的兼容模型密钥）可用
+
+多 profile 用户可使用：
+
+```bash
+bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh list --pretty
+bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh use <profile>
+bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
+```
 
 ---
 

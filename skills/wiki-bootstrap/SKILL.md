@@ -28,6 +28,8 @@ description: 当用户要初始化新的远端 OpenViking 知识库（创建 raw
 bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name> --pretty
 ```
 
+可选参数：`--config <path>`、`--profile <name>`。
+
 仅预览（不写入）：
 
 ```bash

@@ -414,13 +414,15 @@ def parse_args() -> argparse.Namespace:
     action="store_true",
     help="Pretty-print JSON output.",
   )
+  parser.add_argument("--config", default=None, help="Path to config JSON")
+  parser.add_argument("--profile", default=None, help="Profile name")
   return parser.parse_args()
 
 
 def main() -> int:
   args = parse_args()
   kbRoot = build_kb_root(args.kb_name)
-  config = OVFSConfig.load()
+  config = OVFSConfig.load(config_path=args.config, profile=args.profile)
 
   try:
     with OVFSClient(config) as client:

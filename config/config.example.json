@@ -1,8 +1,28 @@
 {
-  "openviking_url": "http://openviking.company.com",
-  "openviking_api_key": "",
-  "openviking_timeout": 30,
-  "openai_base_url": "http://company-llm-gateway/v1",
-  "openai_api_key": "",
-  "openai_model": "company-default-model"
+  "version": 2,
+  "profiles": [
+    {
+      "profile": "default",
+      "system": {
+        "id": "system-demo",
+        "name": "演示系统",
+        "ipmp_system_num": "IPMP-DEMO"
+      },
+      "openviking": {
+        "url": "http://openviking.company.com",
+        "api_key": "",
+        "account_id": "",
+        "user_id": "",
+        "timeout": 30
+      },
+      "openai": {
+        "base_url": "http://company-llm-gateway/v1",
+        "api_key": "",
+        "model": "company-default-model"
+      },
+      "defaults": {
+        "kb_name": "demo-kb"
+      }
+    }
+  ]
 }

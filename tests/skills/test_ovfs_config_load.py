@@ -15,6 +15,7 @@ module = module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 OVFSConfig = module.OVFSConfig
+OVFSClient = module.OVFSClient
 
 
 def test_load_falls_back_to_defaults_and_ignores_legacy_ovcli_conf(
@@ -43,10 +44,55 @@ def test_load_falls_back_to_defaults_and_ignores_legacy_ovcli_conf(
 def test_load_prefers_env_overrides(monkeypatch) -> None:
   monkeypatch.setenv("OPENVIKING_URL", "http://env-host:1933")
   monkeypatch.setenv("OPENVIKING_API_KEY", "env-key")
+  monkeypatch.setenv("OPENVIKING_ACCOUNT_ID", "env-account")
+  monkeypatch.setenv("OPENVIKING_USER_ID", "env-user")
   monkeypatch.setenv("OPENVIKING_TIMEOUT", "45.5")
 
   config = OVFSConfig.load()
 
   assert config.url == "http://env-host:1933"
   assert config.api_key == "env-key"
+  assert config.account_id == "env-account"
+  assert config.user_id == "env-user"
   assert config.timeout == 45.5
+
+
+def test_load_reads_profile_account_user_from_v2_config(tmp_path: Path, monkeypatch) -> None:
+  config_path = tmp_path / "config.json"
+  config_path.write_text(
+    '{"version":2,"profiles":[{"profile":"dev","system":{"name":"Dev System"},"openviking":{"url":"http://dev:1933","api_key":"dev-key","account_id":"dev-account","user_id":"dev-user","timeout":18}}]}',
+    encoding="utf-8",
+  )
+
+  monkeypatch.delenv("OPENVIKING_URL", raising=False)
+  monkeypatch.delenv("OPENVIKING_API_KEY", raising=False)
+  monkeypatch.delenv("OPENVIKING_ACCOUNT_ID", raising=False)
+  monkeypatch.delenv("OPENVIKING_USER_ID", raising=False)
+  monkeypatch.delenv("OPENVIKING_TIMEOUT", raising=False)
+
+  config = OVFSConfig.load(config_path=str(config_path), profile="dev")
+
+  assert config.url == "http://dev:1933"
+  assert config.api_key == "dev-key"
+  assert config.account_id == "dev-account"
+  assert config.user_id == "dev-user"
+  assert config.profile == "dev"
+  assert config.system_name == "Dev System"
+  assert config.timeout == 18.0
+
+
+def test_client_sets_auth_headers() -> None:
+  config = OVFSConfig(
+    url="http://localhost:1933",
+    api_key="header-key",
+    account_id="header-account",
+    user_id="header-user",
+  )
+
+  client = OVFSClient(config=config)
+  try:
+    assert client.session.headers.get("X-API-Key") == "header-key"
+    assert client.session.headers.get("X-OpenViking-Account") == "header-account"
+    assert client.session.headers.get("X-OpenViking-User") == "header-user"
+  finally:
+    client.close()

@@ -14,6 +14,7 @@ if spec is None or spec.loader is None:
 module = module_from_spec(spec)
 spec.loader.exec_module(module)
 buildSynthesisTarget = module.build_synthesis_target
+parseArgs = module.parse_args
 
 
 def test_build_synthesis_target_with_slug() -> None:
@@ -24,3 +25,26 @@ def test_build_synthesis_target_without_slug_prefix() -> None:
   target = buildSynthesisTarget(None, "这份文档的核心目标是什么？")
   assert target.startswith("wiki/syntheses/这份文档的核心目标是-")
   assert re.fullmatch(r"wiki/syntheses/.+-\d{8}-\d{6}\.md", target)
+
+
+def test_parse_args_supports_config_and_profile(monkeypatch) -> None:
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "query.py",
+      "--kb-name",
+      "team-a/project-x",
+      "--question",
+      "hi",
+      "--config",
+      "/tmp/config.json",
+      "--profile",
+      "p2",
+    ],
+  )
+
+  args = parseArgs()
+
+  assert args.config == "/tmp/config.json"
+  assert args.profile == "p2"

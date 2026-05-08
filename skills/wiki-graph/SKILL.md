@@ -28,6 +28,8 @@ description: 当用户要求生成或刷新远端 wiki 图谱产物（graph.json
 bash ~/.config/opencode/skills/wiki-graph/scripts/run.sh --kb-name <kb-name> --pretty
 ```
 
+可选参数：`--config <path>`、`--profile <name>`。
+
 ## 强约束
 
 - 不要调用项目根目录 `scripts/` 下的命令

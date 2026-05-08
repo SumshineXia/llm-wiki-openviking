@@ -842,6 +842,8 @@ def write_page(client: OVFSClient, uri: str, content: str, reason: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build an explicit-link graph from a remote OpenViking wiki KB.")
     parser.add_argument("--kb-name", required=True, help="Knowledge base name under viking://resources/")
+    parser.add_argument("--config", default=None, help="Path to config JSON")
+    parser.add_argument("--profile", default=None, help="Profile name")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     return parser.parse_args()
 
@@ -849,7 +851,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     kb_root = build_kb_root(args.kb_name)
-    config = OVFSConfig.load()
+    config = OVFSConfig.load(config_path=args.config, profile=args.profile)
 
     try:
         with OVFSClient(config) as client:

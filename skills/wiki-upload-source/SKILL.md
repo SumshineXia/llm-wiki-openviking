@@ -32,6 +32,8 @@ bash ~/.config/opencode/skills/wiki-upload-source/scripts/run.sh \
   --pretty
 ```
 
+可选参数：`--config <path>`、`--profile <name>`。
+
 ## 强约束
 
 - `--to` 必须以 `raw/` 开头

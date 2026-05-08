@@ -31,6 +31,8 @@ bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
   --pretty
 ```
 
+可选参数：`--config <path>`、`--profile <name>`。
+
 仅预览（不写入）：
 
 ```bash

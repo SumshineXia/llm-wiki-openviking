@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from common import build_kb_root, normalize_viking_uri, print_json, validate_kb_name
-from ovfs import OVFSClient
+from ovfs import OVFSClient, OVFSConfig
 
 
 def validate_upload_target(target: str) -> str:
@@ -33,11 +33,20 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--file", required=True, help="本地文件路径")
   parser.add_argument("--to", required=True, help="上传目标相对路径，必须以 raw/ 开头")
   parser.add_argument("--wait", action="store_true", help="等待远端写入完成后再返回")
+  parser.add_argument("--config", default=None, help="配置文件路径")
+  parser.add_argument("--profile", default=None, help="profile 名称")
   parser.add_argument("--pretty", action="store_true", help="格式化输出 JSON")
   return parser.parse_args()
 
 
-def runUpload(kbName: str, sourceFile: str, target: str, waitForCompletion: bool = False) -> dict[str, Any]:
+def runUpload(
+  kbName: str,
+  sourceFile: str,
+  target: str,
+  waitForCompletion: bool = False,
+  configPath: str | None = None,
+  profile: str | None = None,
+) -> dict[str, Any]:
   normalizedKbName = validate_kb_name(kbName)
   sourcePath = Path(sourceFile).expanduser().resolve()
   if not sourcePath.exists() or not sourcePath.is_file():
@@ -47,7 +56,8 @@ def runUpload(kbName: str, sourceFile: str, target: str, waitForCompletion: bool
   kbRoot = build_kb_root(normalizedKbName)
   targetUri = normalize_viking_uri(normalizedKbName, normalizedTarget)
 
-  with OVFSClient() as client:
+  config = OVFSConfig.load(config_path=configPath, profile=profile)
+  with OVFSClient(config) as client:
     client.add_local_resource(file_path=str(sourcePath), to=targetUri, wait=waitForCompletion)
 
   return {
@@ -62,7 +72,14 @@ def runUpload(kbName: str, sourceFile: str, target: str, waitForCompletion: bool
 
 def main() -> None:
   args = parse_args()
-  result = runUpload(args.kb_name, args.file, args.to, waitForCompletion=args.wait)
+  result = runUpload(
+    args.kb_name,
+    args.file,
+    args.to,
+    waitForCompletion=args.wait,
+    configPath=args.config,
+    profile=args.profile,
+  )
   print_json(result, pretty=args.pretty)
 
 

@@ -23,15 +23,27 @@ class OVFSHTTPError(OVFSError):
 class OVFSConfig:
     url: str
     api_key: Optional[str] = None
+    account_id: Optional[str] = None
+    user_id: Optional[str] = None
+    profile: Optional[str] = None
+    system_name: Optional[str] = None
     timeout: float = 30.0
 
     @classmethod
-    def load(cls) -> "OVFSConfig":
+    def load(
+        cls,
+        config_path: Optional[str] = None,
+        profile: Optional[str] = None,
+    ) -> "OVFSConfig":
         from common import load_config
 
-        config = load_config()
+        config = load_config(config_path=config_path, profile=profile)
         url = str(config.get("openviking_url", "http://localhost:1933"))
         api_key = config.get("openviking_api_key") or None
+        account_id = config.get("openviking_account_id") or None
+        user_id = config.get("openviking_user_id") or None
+        profile_name = config.get("profile") or None
+        system_name = config.get("system_name") or None
 
         try:
             timeout_value = float(config.get("openviking_timeout", 30.0))
@@ -43,6 +55,10 @@ class OVFSConfig:
         return cls(
             url=url.rstrip("/"),
             api_key=api_key,
+            account_id=account_id,
+            user_id=user_id,
+            profile=profile_name,
+            system_name=system_name,
             timeout=timeout_value,
         )
 
@@ -66,6 +82,10 @@ class OVFSClient:
         self.session.headers.update({"Accept": "application/json"})
         if self.config.api_key:
             self.session.headers["X-API-Key"] = self.config.api_key
+        if self.config.account_id:
+            self.session.headers["X-OpenViking-Account"] = self.config.account_id
+        if self.config.user_id:
+            self.session.headers["X-OpenViking-User"] = self.config.user_id
 
     def close(self) -> None:
         self.session.close()

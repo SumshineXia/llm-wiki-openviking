@@ -116,7 +116,7 @@ def pick_first_non_empty(*values: Optional[str]) -> Optional[str]:
 
 def resolve_openai_settings(args: argparse.Namespace) -> Dict[str, Optional[str]]:
     llm_config = load_llm_config(args.llm_config)
-    runtime_config = load_config()
+    runtime_config = load_config(config_path=args.config, profile=args.profile)
 
     config_api_key = llm_config.get("openai_api_key")
     config_base_url = llm_config.get("openai_base_url")
@@ -585,6 +585,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not write changes back to OpenViking")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print result JSON")
+    parser.add_argument("--config", default=None, help="Path to config JSON")
+    parser.add_argument("--profile", default=None, help="Profile name")
     return parser.parse_args()
 
 
@@ -592,8 +594,8 @@ def main() -> int:
     args = parse_args()
     kb_root = build_kb_root(args.kb_name)
     schema_text = read_local_schema()
-    _ = load_config()
-    config = OVFSConfig.load()
+    _ = load_config(config_path=args.config, profile=args.profile)
+    config = OVFSConfig.load(config_path=args.config, profile=args.profile)
     openai_settings = resolve_openai_settings(args)
 
     try:
