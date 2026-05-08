@@ -1,148 +1,156 @@
-# Wiki Schema
+# Wiki 结构规范
 
-## 1. Knowledge Base Root
+## 1. 知识库根目录
 
-Each knowledge base is stored under:
+每个知识库存储在：
 
 `viking://resources/<kb>/`
 
-Required structure:
+必需结构：
 
-- `raw/` — source materials
-- `wiki/` — generated wiki pages
-- `wiki/index.md` — canonical index of all wiki pages
-- `wiki/overview.md` — high-level summary of the knowledge base
-- `wiki/log.md` — chronological operation log
-- `wiki/sources/` — source pages derived from raw materials
-- `wiki/entities/` — entity pages
-- `wiki/concepts/` — concept pages
-- `wiki/syntheses/` — saved query syntheses
-- `graph/` — graph outputs such as `graph.json` and `graph.html`
+- `raw/` - 原始资料目录
+- `wiki/` - 结构化 wiki 页面目录
+- `wiki/index.md` - wiki 页面的规范索引
+- `wiki/overview.md` - 知识库全局概览
+- `wiki/log.md` - 时间顺序操作日志
+- `wiki/sources/` - 由 raw 资料抽取的来源页
+- `wiki/entities/` - 实体页
+- `wiki/concepts/` - 概念页
+- `wiki/syntheses/` - 问答综合页
+- `graph/` - 图谱产物目录（如 `graph.json`、`graph.html`）
 
-## 2. Page Types
+## 2. 页面类型
 
-### 2.1 Source Page
-Purpose: summarize one raw source and extract key entities, concepts, claims, and links.
+### 2.1 来源页
+用途：总结单个原始资料，提取关键实体、概念、论断与链接。
 
-Location:
+位置：
 `wiki/sources/<slug>.md`
 
-### 2.2 Entity Page
-Purpose: describe a concrete named entity such as person, company, project, paper, library, tool, dataset, or organization.
+### 2.2 实体页
+用途：描述具名实体，例如人物、公司、项目、论文、库、工具、数据集、组织。
 
-Location:
+位置：
 `wiki/entities/<slug>.md`
 
-### 2.3 Concept Page
-Purpose: describe an abstract concept, method, workflow, architecture, principle, or recurring theme.
+### 2.3 概念页
+用途：描述抽象概念、方法、流程、架构、原则或反复出现的主题。
 
-Location:
+位置：
 `wiki/concepts/<slug>.md`
 
-### 2.4 Synthesis Page
-Purpose: save a query-driven synthesized answer derived from multiple wiki pages.
+### 2.4 综合页
+用途：保存基于多个 wiki 页面推导出的查询答案。
 
-Location:
+位置：
 `wiki/syntheses/<slug>.md`
 
-## 3. Naming Rules
+## 3. 命名规则
 
-- Use lowercase kebab-case for filenames.
-- Keep filenames stable once created.
-- Prefer short but specific names.
-- Use one canonical page per main concept/entity whenever possible.
+- 文件名使用小写 kebab-case。
+- 页面建立后文件名保持稳定。
+- 名称尽量简短且具区分性。
+- 同一核心实体或概念尽量保持唯一规范页。
 
-## 4. Linking Rules
+## 4. 链接规则
 
-- Use `[[wikilinks]]` for internal page references.
-- Prefer linking to canonical pages rather than repeating explanations.
-- Every page should link outward to at least one related page unless it is a bootstrap stub.
+- 内部引用使用 `[[wikilinks]]`。
+- 优先链接到规范页，避免在多处重复解释。
+- 除初始化占位页外，每页至少应有一个外链到相关页面。
 
-## 5. Required Page Template
+## 5. 页面基础模板
 
-Each wiki page should include:
+每个 wiki 页面应包含：
 
-- Title
-- Type
-- Summary
-- Main content
-- Related links
-- Source references if applicable
+- Title（标题）
+- Type（类型）
+- Summary（摘要）
+- Main content（正文）
+- Related links（相关链接）
+- Source references（来源引用，按需）
 
-## 6. Index Rules
+## 6. 语言与不翻译约束
 
-`wiki/index.md` is the canonical directory of wiki pages.
+- 页面正文与说明性内容使用简体中文。
+- 页面标题使用简体中文。
+- JSON 字段名保持英文。
+- 文件路径和目录名保持英文。
+- `slug`、文件名、目录名、扩展名保持原格式，不做本地化翻译。
 
-It should group entries under:
+## 7. 索引规则
+
+`wiki/index.md` 是 wiki 页面的规范目录。
+
+应按以下分组组织：
 - Sources
 - Entities
 - Concepts
 - Syntheses
 
-Every real wiki page should appear in `index.md`.
+所有真实页面都应出现在 `wiki/index.md`。
 
-## 7. Overview Rules
+## 8. 概览规则
 
-`wiki/overview.md` should summarize:
-- main topics
-- important entities
-- major concepts
-- known gaps
-- recent changes
+`wiki/overview.md` 应总结：
+- 主要主题
+- 关键实体
+- 核心概念
+- 已知缺口
+- 最近变更
 
-It should be concise but updated after major ingest operations.
+内容应简洁，并在关键 ingest 操作后更新。
 
-## 8. Log Rules
+## 9. 日志规则
 
-`wiki/log.md` records chronological actions such as:
+`wiki/log.md` 记录时间顺序动作，例如：
 - source ingested
 - page created
 - page updated
 - synthesis saved
 - structural refactor
 
-Each entry should include:
+每条日志应包含：
 - timestamp
 - action type
 - target pages
 - short note
 
-## 9. Ingest Workflow
+## 10. Ingest 工作流
 
-When ingesting a raw source:
+执行 raw 资料 ingest 时：
 
-1. Read the raw source.
-2. Read relevant context from `wiki/index.md`, `wiki/overview.md`, and related pages.
-3. Create or update one source page.
-4. Create or update related entity pages.
-5. Create or update related concept pages.
-6. Update `wiki/index.md`.
-7. Update `wiki/overview.md`.
-8. Append a record to `wiki/log.md`.
+1. 读取 raw 源资料。
+2. 读取 `wiki/index.md`、`wiki/overview.md` 及相关页面上下文。
+3. 创建或更新一个来源页。
+4. 创建或更新相关实体页。
+5. 创建或更新相关概念页。
+6. 更新 `wiki/index.md`。
+7. 更新 `wiki/overview.md`。
+8. 向 `wiki/log.md` 追加记录。
 
-## 10. Query Workflow
+## 11. Query 工作流
 
-When answering a query:
+回答查询时：
 
-1. Read `wiki/index.md`.
-2. Select relevant pages.
-3. Read those pages.
-4. Synthesize an answer grounded in the wiki.
-5. Optionally save the result to `wiki/syntheses/`.
-6. If saved, update `wiki/index.md` and `wiki/log.md`.
+1. 读取 `wiki/index.md`。
+2. 选择相关页面。
+3. 阅读这些页面。
+4. 基于 wiki 证据综合答案。
+5. 可选：将结果保存到 `wiki/syntheses/`。
+6. 若已保存，更新 `wiki/index.md` 与 `wiki/log.md`。
 
-## 11. Health Workflow
+## 12. Health 工作流
 
-Health checks should verify:
-- required directories exist
-- required root pages exist
-- index entries point to real pages
-- key pages are not empty
-- source pages are reflected in the log
+健康检查应验证：
+- 必需目录存在
+- 必需根页面存在
+- 索引条目指向真实页面
+- 关键页面非空
+- 来源页在日志中可追踪
 
-## 12. Graph Workflow
+## 13. Graph 工作流
 
-Graph outputs are optional.
-They may be generated from explicit `[[wikilinks]]` and inferred semantic edges.
-Only final graph artifacts should be written to remote storage.
-Temporary graph caches should remain local.
+图谱输出为可选。
+可由显式 `[[wikilinks]]` 与推断语义边生成。
+仅最终图谱产物写入远端存储。
+临时图缓存应保留在本地。

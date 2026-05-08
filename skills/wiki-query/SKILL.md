@@ -1,6 +1,6 @@
 ---
 name: wiki-query
-description: Use when the user asks natural-language Q&A over a remote KB wiki, including follow-up asks to save the answer as synthesis. Trigger phrases include "基于 my-kb 回答这个问题", "执行 wiki-query", "请把刚才答案保存为 synthesis", "保存一个名为 <slug> 的 synthesis", and "--save/--slug" style requests.
+description: 当用户要求基于远端 KB wiki 进行自然语言问答（并可选保存为 synthesis）时使用；中文触发描述优先。
 ---
 
 # Wiki Query
@@ -9,6 +9,7 @@ description: Use when the user asks natural-language Q&A over a remote KB wiki, 
 
 当用户表达以下意图时使用：
 
+- “请基于 my-kb 回答这个问题”
 - “基于 my-kb 回答这个问题”
 - “执行 wiki-query”
 - “把刚才答案保存为 synthesis”

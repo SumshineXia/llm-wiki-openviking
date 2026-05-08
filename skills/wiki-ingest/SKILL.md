@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: Use when the user asks to ingest a remote raw source into wiki pages, such as turning viking://resources/<kb>/raw/*.md into sources/entities/concepts and updating index/overview/log. Trigger phrases include "执行 wiki-ingest", "把 raw/*.md ingest 成 wiki 页面", "对这个 source 做远端 ingest", and "更新 index、overview、log".
+description: 当用户要求把远端 raw source ingest 成 wiki 页面（并更新 index/overview/log）时使用；中文触发描述优先。
 ---
 
 # Wiki Ingest
@@ -9,6 +9,7 @@ description: Use when the user asks to ingest a remote raw source into wiki page
 
 当用户表达以下意图时使用：
 
+- “对 my-kb 执行 wiki-ingest”
 - “把 raw/*.md ingest 成 wiki 页面”
 - “对这个 source 做远端 ingest”
 - “更新 index/overview/log”

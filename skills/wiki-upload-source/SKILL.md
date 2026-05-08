@@ -1,6 +1,6 @@
 ---
 name: wiki-upload-source
-description: Use when the user asks to upload a local file into a KB raw/ path, such as "上传本地文件到 raw/", "执行 wiki-upload-source", or "把这个文件放到 my-kb 的 raw/ 下".
+description: 当用户要求把本地文件上传到某个 KB 的 raw/ 路径时使用；中文触发描述优先。
 ---
 
 # Wiki Upload Source
@@ -9,6 +9,7 @@ description: Use when the user asks to upload a local file into a KB raw/ path, 
 
 当用户表达以下意图时使用：
 
+- “把这个文件上传到 my-kb 的 raw/ 下”
 - “把这个本地 md 上传到 my-kb 的 raw/”
 - “执行 wiki-upload-source”
 - “把文件放到某个 KB 的 raw 目录”

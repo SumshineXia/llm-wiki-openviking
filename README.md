@@ -66,6 +66,12 @@
 
 完成安装和配置后，你可以在任意目录打开 OpenCode，直接用自然语言描述目标。
 
+### 中文优先约定
+
+- 页面标题和正文默认生成中文
+- 技术术语、路径、命令、API 名保留英文
+- 保持 CLI 参数、目录结构、JSON 字段名不变。
+
 推荐顺序：
 
 1. 先 bootstrap 新知识库
@@ -96,6 +102,14 @@
    - 「对 `<kb>` 执行 wiki-lint，看看有没有孤儿页或重复标题」
 7. `wiki-graph`
    - 「为 `<kb>` 生成 wiki graph，输出 graph.json 和 graph.html」
+
+### 常见自然语言用法
+
+- 「先帮我为 `team-a/project-x` 做 wiki-bootstrap，再跑一次 wiki-health」
+- 「把 `team-a/project-x` 的 `raw/demo.md` ingest 成 wiki 页面，并更新 index/overview/log」
+- 「基于 `team-a/project-x` 回答：这个知识库当前的核心概念是什么？然后保存为 synthesis」
+- 「对 `team-a/project-x` 执行 wiki-lint，重点看孤儿页和重复标题」
+- 「为 `team-a/project-x` 构建 graph.json 和 graph.html，先 dry-run 再生成」
 
 ---
 

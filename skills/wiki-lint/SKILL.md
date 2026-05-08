@@ -1,6 +1,6 @@
 ---
 name: wiki-lint
-description: Use when the user asks for remote wiki quality lint checks after ingest/query/cleanup, especially for structure quality and link hygiene. Trigger phrases include "执行 wiki-lint", "检查远端 wiki 的结构质量问题", "看有没有孤儿页/重复标题/stub", and "再跑一次 lint".
+description: 当用户要求对远端 wiki 做质量 lint 检查（结构质量与链接卫生）时使用；中文触发描述优先。
 ---
 
 # Wiki Lint
@@ -9,6 +9,7 @@ description: Use when the user asks for remote wiki quality lint checks after in
 
 当用户表达以下意图时使用：
 
+- “对 my-kb 执行 wiki-lint”
 - “执行 wiki-lint”
 - “检查有没有孤儿页/重复标题/stub”
 - “看下远端 wiki 的链接质量”

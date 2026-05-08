@@ -32,11 +32,12 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--kb-name", required=True, help="知识库名称")
   parser.add_argument("--file", required=True, help="本地文件路径")
   parser.add_argument("--to", required=True, help="上传目标相对路径，必须以 raw/ 开头")
+  parser.add_argument("--wait", action="store_true", help="等待远端写入完成后再返回")
   parser.add_argument("--pretty", action="store_true", help="格式化输出 JSON")
   return parser.parse_args()
 
 
-def runUpload(kbName: str, sourceFile: str, target: str) -> dict[str, Any]:
+def runUpload(kbName: str, sourceFile: str, target: str, waitForCompletion: bool = False) -> dict[str, Any]:
   normalizedKbName = validate_kb_name(kbName)
   sourcePath = Path(sourceFile).expanduser().resolve()
   if not sourcePath.exists() or not sourcePath.is_file():
@@ -47,20 +48,21 @@ def runUpload(kbName: str, sourceFile: str, target: str) -> dict[str, Any]:
   targetUri = normalize_viking_uri(normalizedKbName, normalizedTarget)
 
   with OVFSClient() as client:
-    client.add_local_resource(file_path=str(sourcePath), to=targetUri, wait=True)
+    client.add_local_resource(file_path=str(sourcePath), to=targetUri, wait=waitForCompletion)
 
   return {
     "kb_name": normalizedKbName,
     "kb_root": kbRoot,
     "source_file": str(sourcePath),
     "target_uri": targetUri,
+    "wait": waitForCompletion,
     "uploaded": True,
   }
 
 
 def main() -> None:
   args = parse_args()
-  result = runUpload(args.kb_name, args.file, args.to)
+  result = runUpload(args.kb_name, args.file, args.to, waitForCompletion=args.wait)
   print_json(result, pretty=args.pretty)
 
 

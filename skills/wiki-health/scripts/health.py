@@ -355,26 +355,26 @@ def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
   warnings: list[str] = []
 
   if missingDirs:
-    errors.append(f"Missing required directories: {len(missingDirs)}")
+    errors.append(f"缺少必要目录：{len(missingDirs)}")
   if missingFiles:
-    errors.append(f"Missing required root files: {len(missingFiles)}")
+    errors.append(f"缺少必要根页面文件：{len(missingFiles)}")
   if emptyKeyPages:
-    errors.append(f"Empty or invalid key pages: {len(emptyKeyPages)}")
+    errors.append(f"关键页面为空或无效：{len(emptyKeyPages)}")
   if brokenIndexTargets:
-    errors.append(f"Broken links referenced by wiki/index.md: {len(brokenIndexTargets)}")
+    errors.append(f"wiki/index.md 引用的内部链接失效：{len(brokenIndexTargets)}")
   if not allSourcePages:
-    warnings.append("No source pages found under wiki/sources/")
+    warnings.append("wiki/sources/ 下未发现来源页面")
 
   if not linkedTargets:
-    warnings.append("wiki/index.md contains no parseable internal links")
+    warnings.append("wiki/index.md 中未解析到内部链接")
   if not allEntityPages and not allConceptPages and not allSynthesisPages:
-    warnings.append("No entity, concept, or synthesis pages found")
+    warnings.append("未发现实体、概念或综合结论页面")
   if len(allWikiPages) <= 3:
-    warnings.append("Wiki appears to contain only root pages")
+    warnings.append("Wiki 可能仅包含根页面")
 
   if missingSourceLogEntries:
     warnings.append(
-      f"Source pages not reflected in wiki/log.md: {len(missingSourceLogEntries)}"
+      f"来源页面未记录到 wiki/log.md：{len(missingSourceLogEntries)}"
     )
 
   status = "ok" if not errors else "error"
@@ -429,7 +429,7 @@ def main() -> int:
     errorReport = {
       "status": "error",
       "kb_root": kbRoot,
-      "errors": [f"OVFS error: {str(exc)}"],
+      "errors": [f"OVFS 错误：{str(exc)}"],
       "warnings": [],
       "details": {},
     }
@@ -439,7 +439,7 @@ def main() -> int:
     errorReport = {
       "status": "error",
       "kb_root": kbRoot,
-      "errors": [f"Unexpected error: {str(exc)}"],
+      "errors": [f"未预期错误：{str(exc)}"],
       "warnings": [],
       "details": {},
     }

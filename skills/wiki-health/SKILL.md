@@ -1,6 +1,6 @@
 ---
 name: wiki-health
-description: Use when the user asks to run wiki-health for a KB, re-check structural integrity after ingest/query, or verify remote wiki structure completeness (dirs, root pages, key-page validity, index targets, source-log coverage). Trigger phrases include "执行 wiki-health", "检查结构是否完整", "再执行一次 health", and "ingest 后检查知识库结构".
+description: 当用户要求对 KB 执行 wiki-health（检查远端 wiki 结构完整性）时使用；中文触发描述优先。
 ---
 
 # Wiki Health
@@ -9,6 +9,7 @@ description: Use when the user asks to run wiki-health for a KB, re-check struct
 
 当用户表达以下意图时使用：
 
+- “对 my-kb 执行 wiki-health”
 - “执行 wiki-health”
 - “检查结构是否完整”
 - “ingest 后再做一次健康检查”

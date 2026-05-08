@@ -14,6 +14,7 @@ normalize_relative_wiki_target = module.normalize_relative_wiki_target
 extract_index_links = module.extract_index_links
 check_index_targets = module.check_index_targets
 check_required_structure = module.check_required_structure
+build_report = module.build_report
 requiredDirs = module.requiredDirs
 
 
@@ -60,6 +61,28 @@ class FakeClient:
 
   def ls(self, uri: str, recursive: bool = False) -> list[str]:
     return []
+
+
+def test_health_report_keys_remain_english() -> None:
+  kb_root = "viking://resources/my-kb/"
+  required_file_uris = required_wiki_pages(kb_root)
+  stats = {
+    **{f"{kb_root}{rel}": {"isDir": True} for rel in requiredDirs},
+    **{uri: {"isDir": False} for uri in required_file_uris},
+  }
+  texts = {
+    required_file_uris[0]: "# Index\n\n- [[overview]]\n",
+    required_file_uris[1]: "# Overview\n\n这是一个足够长的概览内容，用于通过有效页面判断。",
+    required_file_uris[2]: "# 日志\n\n已记录来源：index\n",
+  }
+  client = FakeClient(texts=texts, stats=stats)
+
+  report = build_report(client, kb_root)
+
+  assert "status" in report
+  assert "warnings" in report
+  assert "errors" in report
+  assert "details" in report
 
 
 def test_check_index_targets_does_not_report_existing_parent_relative_link() -> None:

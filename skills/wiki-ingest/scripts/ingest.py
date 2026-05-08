@@ -25,6 +25,24 @@ LEGACY_LLM_CONFIG_PATHS = [
     Path(__file__).resolve().parent.parent / "config" / "wiki_query.conf.json",
 ]
 
+INDEX_TITLE = "# 索引"
+OVERVIEW_TITLE = "# 概览"
+LOG_TITLE = "# 操作日志"
+
+INDEX_SECTIONS = {
+    "sources": "## 资料来源",
+    "entities": "## 实体",
+    "concepts": "## 概念",
+    "syntheses": "## 综合结论",
+}
+
+LEGACY_INDEX_SECTIONS = {
+    "sources": ["## Sources"],
+    "entities": ["## Entities"],
+    "concepts": ["## Concepts"],
+    "syntheses": ["## Syntheses"],
+}
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -250,9 +268,9 @@ def list_markdown_pages(client: OVFSClient, root_uri: str) -> List[str]:
 
 
 def build_context_snapshot(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
-    index_text = read_if_exists(client, kb_root + "wiki/index.md", "# Index\n")
-    overview_text = read_if_exists(client, kb_root + "wiki/overview.md", "# Overview\n")
-    log_text = read_if_exists(client, kb_root + "wiki/log.md", "# Log\n")
+    index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
+    overview_text = read_if_exists(client, kb_root + "wiki/overview.md", OVERVIEW_TITLE + "\n")
+    log_text = read_if_exists(client, kb_root + "wiki/log.md", LOG_TITLE + "\n")
 
     entity_pages = list_markdown_pages(client, kb_root + "wiki/entities/")
     concept_pages = list_markdown_pages(client, kb_root + "wiki/concepts/")
@@ -279,70 +297,76 @@ def build_llm_prompt(
     concept_page_names = [PurePosixPath(uri).name for uri in context["concept_pages"]][:100]
 
     return f"""
-You are generating wiki content for a remote OpenViking-backed llm-wiki knowledge base.
+你正在为基于远端 OpenViking 的 llm-wiki 知识库生成 wiki 内容。
 
-Follow this schema strictly:
+请严格遵循以下 schema：
 
 --- SCHEMA START ---
 {schema_text}
 --- SCHEMA END ---
 
-Current source URI:
+当前 source URI：
 {source_uri}
 
-Preferred source slug:
+建议使用的 source slug：
 {source_slug}
 
-Current wiki/index.md:
+当前 wiki/index.md：
 --- INDEX START ---
 {context["index_text"]}
 --- INDEX END ---
 
-Current wiki/overview.md:
+当前 wiki/overview.md：
 --- OVERVIEW START ---
 {context["overview_text"]}
 --- OVERVIEW END ---
 
-Existing entity page filenames:
+已存在的实体页文件名：
 {json.dumps(entity_page_names, ensure_ascii=False)}
 
-Existing concept page filenames:
+已存在的概念页文件名：
 {json.dumps(concept_page_names, ensure_ascii=False)}
 
-Raw source text:
+原始 source 文本：
 --- SOURCE START ---
 {source_text}
 --- SOURCE END ---
 
-Return ONLY valid JSON with this exact shape:
+仅返回合法 JSON，且必须严格匹配以下结构：
 
 {{
   "source_title": "string",
-  "source_page_markdown": "full markdown content for the source page",
+  "source_page_markdown": "source 页面完整 markdown 内容",
   "entity_pages": [
     {{
       "slug": "kebab-case-slug",
       "title": "string",
-      "markdown": "full markdown content"
+      "markdown": "完整 markdown 内容"
     }}
   ],
   "concept_pages": [
     {{
       "slug": "kebab-case-slug",
       "title": "string",
-      "markdown": "full markdown content"
+      "markdown": "完整 markdown 内容"
     }}
   ],
-  "overview_note": "1-2 paragraph markdown summary to append to overview",
-  "log_note": "short one-line log entry content"
+  "overview_note": "追加到 overview 的 1-2 段 markdown 摘要",
+  "log_note": "一行简短日志内容"
 }}
 
-Rules:
-- Use stable, lowercase kebab-case slugs.
-- Prefer creating only necessary entity/concept pages.
-- Link pages with [[wikilinks]] where appropriate.
-- Do not include code fences.
-- Do not return extra commentary outside the JSON.
+规则：
+- 所有自然语言内容必须使用简体中文。
+- 标题必须使用简体中文。
+- 正文必须使用简体中文。
+- 原始资料为英文时，不直接生成英文 wiki 页面，应提炼为中文内容。
+- 必要技术术语、代码名、API名、路径、命令、库名可保留英文。
+- JSON 字段名必须保持英文。
+- slug 必须稳定，且使用小写 kebab-case。
+- 优先只创建必要的 entity/concept 页面。
+- 在合适位置使用 [[wikilinks]] 进行链接。
+- 不要包含代码块围栏。
+- 不要在 JSON 之外返回任何额外说明。
 """.strip()
 
 
@@ -384,7 +408,7 @@ def call_llm(
         messages=[
             {
                 "role": "system",
-                "content": "You are a careful knowledge-base construction assistant. Output valid JSON only.",
+                "content": "你是一个严谨的知识库构建助手。你必须只输出合法 JSON，不要输出任何额外文本。",
             },
             {
                 "role": "user",
@@ -440,13 +464,26 @@ def ensure_section(index_text: str, heading: str) -> str:
     return text + "\n"
 
 
-def append_unique_bullet(index_text: str, heading: str, bullet: str) -> str:
+def get_section_heading_by_key(index_text: str, section_key: str) -> tuple[str, str]:
+    canonical_heading = INDEX_SECTIONS[section_key]
+    if canonical_heading in index_text:
+        return canonical_heading, canonical_heading
+
+    for legacy_heading in LEGACY_INDEX_SECTIONS.get(section_key, []):
+        if legacy_heading in index_text:
+            return legacy_heading, canonical_heading
+
+    return canonical_heading, canonical_heading
+
+
+def append_unique_bullet(index_text: str, section_key: str, bullet: str) -> str:
+    heading, _ = get_section_heading_by_key(index_text, section_key)
     index_text = ensure_section(index_text, heading)
 
     if bullet in index_text:
         return index_text
 
-    pattern = re.compile(rf"(^##\s+{re.escape(heading[3:])}\s*$)", re.MULTILINE)
+    pattern = re.compile(rf"(^{re.escape(heading)}\s*$)", re.MULTILINE)
     match = pattern.search(index_text)
     if not match:
         # fallback append
@@ -465,21 +502,20 @@ def update_index_text(
 ) -> str:
     updated = index_text
 
-    updated = ensure_section(updated, "## Sources")
-    updated = ensure_section(updated, "## Entities")
-    updated = ensure_section(updated, "## Concepts")
-    updated = ensure_section(updated, "## Syntheses")
+    for section_key in ("sources", "entities", "concepts", "syntheses"):
+        heading, _ = get_section_heading_by_key(updated, section_key)
+        updated = ensure_section(updated, heading)
 
     source_bullet = f"- [[sources/{source_slug}.md]] - {source_title}"
-    updated = append_unique_bullet(updated, "## Sources", source_bullet)
+    updated = append_unique_bullet(updated, "sources", source_bullet)
 
     for page in entity_pages:
         bullet = f"- [[entities/{page['slug']}.md]] - {page['title']}"
-        updated = append_unique_bullet(updated, "## Entities", bullet)
+        updated = append_unique_bullet(updated, "entities", bullet)
 
     for page in concept_pages:
         bullet = f"- [[concepts/{page['slug']}.md]] - {page['title']}"
-        updated = append_unique_bullet(updated, "## Concepts", bullet)
+        updated = append_unique_bullet(updated, "concepts", bullet)
 
     return updated
 
@@ -489,9 +525,16 @@ def append_overview_note(overview_text: str, note: str, source_title: str) -> st
     if not note:
         return overview_text
 
-    section_heading = "## Recent Additions"
+    section_heading = "## 最近更新"
     if section_heading not in overview_text:
         overview_text = overview_text.rstrip() + f"\n\n{section_heading}\n"
+
+    existing_block_pattern = re.compile(
+        rf"^###\s+{re.escape(source_title)}\s+\([^\n]+\)\n\n{re.escape(note)}\n$",
+        re.MULTILINE,
+    )
+    if existing_block_pattern.search(overview_text):
+        return overview_text
 
     stamp = now_iso()
     block = f"\n### {source_title} ({stamp})\n\n{note}\n"
@@ -603,7 +646,7 @@ def main() -> int:
             new_overview_text = append_overview_note(context["overview_text"], overview_note, source_title)
             new_log_text = append_log_entry(
                 context["log_text"],
-                log_note or f"ingested source {source_slug} into wiki/sources/{source_slug}.md",
+                log_note or f"已将资料 {source_slug} 整理为 wiki/sources/{source_slug}.md",
             )
 
             write_plan = {

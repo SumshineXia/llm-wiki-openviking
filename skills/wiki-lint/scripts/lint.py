@@ -424,22 +424,22 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
     warnings: List[str] = []
 
     if broken_links:
-        errors.append(f"Broken internal links: {len(broken_links)}")
+        errors.append(f"内部链接失效：{len(broken_links)}")
 
     if unexpected_wiki_root_entries:
-        errors.append(f"Unexpected wiki root entries: {len(unexpected_wiki_root_entries)}")
+        errors.append(f"wiki 根目录存在非预期条目：{len(unexpected_wiki_root_entries)}")
 
     if orphan_pages:
-        warnings.append(f"Orphan pages: {len(orphan_pages)}")
+        warnings.append(f"孤立页面：{len(orphan_pages)}")
 
     if no_outbound_links:
-        warnings.append(f"Pages without outbound internal links: {len(no_outbound_links)}")
+        warnings.append(f"缺少出站内部链接的页面：{len(no_outbound_links)}")
 
     if duplicate_titles:
-        warnings.append(f"Duplicate page titles: {len(duplicate_titles)}")
+        warnings.append(f"页面标题重复：{len(duplicate_titles)}")
 
     if stub_pages:
-        warnings.append(f"Stub or nearly empty pages: {len(stub_pages)}")
+        warnings.append(f"占位或近似空页面：{len(stub_pages)}")
 
     status = "ok"
     if errors:
@@ -499,7 +499,7 @@ def main() -> int:
         error_report = {
             "status": "error",
             "kb_root": kb_root,
-            "errors": [f"OVFS error: {str(exc)}"],
+            "errors": [f"OVFS 错误：{str(exc)}"],
             "warnings": [],
             "details": {},
         }
@@ -509,7 +509,7 @@ def main() -> int:
         error_report = {
             "status": "error",
             "kb_root": kb_root,
-            "errors": [f"Unexpected error: {str(exc)}"],
+            "errors": [f"未预期错误：{str(exc)}"],
             "warnings": [],
             "details": {},
         }

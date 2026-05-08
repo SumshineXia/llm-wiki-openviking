@@ -16,6 +16,7 @@ spec.loader.exec_module(module)
 build_graph_output_paths = module.build_graph_output_paths
 build_graph_output_dir_uri = module.build_graph_output_dir_uri
 ensure_graph_output_dir = module.ensure_graph_output_dir
+render_graph_html = module.render_graph_html
 
 
 def test_build_graph_output_paths_returns_wiki_graph_targets() -> None:
@@ -53,3 +54,28 @@ def test_ensure_graph_output_dir_uses_wiki_graph_dir() -> None:
       "wiki graph output dir",
     )
   ]
+
+
+def test_render_graph_html_uses_chinese_ui_copy() -> None:
+  graphData = {
+    "nodes": [
+      {
+        "id": "n1",
+        "uri": "viking://resources/my-kb/wiki/index.md",
+        "rel_path": "index.md",
+        "label": "index",
+        "category": "root",
+        "is_root": True,
+      }
+    ],
+    "edges": [],
+  }
+
+  html = render_graph_html(graphData, "viking://resources/my-kb/")
+
+  assert '<html lang="zh-CN">' in html
+  assert "知识图谱" in html
+  assert 'placeholder="搜索页面标题或路径..."' in html
+  assert "未选择页面" in html
+  assert "入链" in html
+  assert "出链" in html

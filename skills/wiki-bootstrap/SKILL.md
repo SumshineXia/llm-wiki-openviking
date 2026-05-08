@@ -1,6 +1,6 @@
 ---
 name: wiki-bootstrap
-description: Use when initializing a new remote OpenViking KB with the required raw/wiki/graph directories and base wiki root pages.
+description: 当用户要初始化新的远端 OpenViking 知识库（创建 raw/wiki/graph 目录与 wiki 根页面）时使用；中文触发描述优先。
 ---
 
 # Wiki Bootstrap
@@ -9,6 +9,7 @@ description: Use when initializing a new remote OpenViking KB with the required 
 
 当用户表达以下意图时使用：
 
+- “请为 my-kb 初始化远端知识库结构”
 - “初始化一个新的 KB”
 - “给 my-kb 建好 raw/wiki/graph 目录”
 - “执行 wiki-bootstrap”

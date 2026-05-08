@@ -15,6 +15,7 @@ if spec is None or spec.loader is None:
 module = module_from_spec(spec)
 spec.loader.exec_module(module)
 plan_bootstrap_paths = module.plan_bootstrap_paths
+build_initial_file_content = module.build_initial_file_content
 
 
 def test_plan_bootstrap_paths_contains_required_dirs_and_files() -> None:
@@ -56,3 +57,20 @@ def test_bootstrap_cli_dry_run_outputs_required_structure() -> None:
   assert "plan" in data
   assert "dirs" in data["plan"]
   assert "files" in data["plan"]
+
+
+def test_build_initial_file_content_uses_chinese_root_templates() -> None:
+  kb_root = "viking://resources/team-a/project-x/wiki-kb/"
+
+  index_content = build_initial_file_content(f"{kb_root}wiki/index.md")
+  overview_content = build_initial_file_content(f"{kb_root}wiki/overview.md")
+  log_content = build_initial_file_content(f"{kb_root}wiki/log.md")
+
+  assert "# 索引" in index_content
+  assert "## 资料来源" in index_content
+  assert "## 实体" in index_content
+  assert "## 概念" in index_content
+  assert "## 综合结论" in index_content
+
+  assert overview_content.startswith("# 概览")
+  assert log_content.startswith("# 操作日志")

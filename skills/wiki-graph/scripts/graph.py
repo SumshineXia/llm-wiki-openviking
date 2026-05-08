@@ -373,10 +373,10 @@ def render_graph_html(graph_data: Dict[str, Any], kb_root: str) -> str:
     payload = json.dumps(graph_data, ensure_ascii=False)
 
     return f"""<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>Wiki Graph</title>
+  <title>知识图谱</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {{
@@ -492,28 +492,28 @@ def render_graph_html(graph_data: Dict[str, Any], kb_root: str) -> str:
 <body>
   <div class="wrap">
     <aside class="sidebar">
-      <h1>Wiki Graph</h1>
+      <h1>知识图谱</h1>
       <div class="meta">
-        KB Root: <br /><code>{kb_root}</code><br />
-        Nodes: <span id="meta-nodes"></span> · Edges: <span id="meta-edges"></span>
+        知识库根路径: <br /><code>{kb_root}</code><br />
+        节点: <span id="meta-nodes"></span> · 连边: <span id="meta-edges"></span>
       </div>
-      <input id="search" type="text" placeholder="Search node title or path..." />
+      <input id="search" type="text" placeholder="搜索页面标题或路径..." />
       <div id="node-list" class="node-list"></div>
     </aside>
 
     <div class="canvas-wrap">
       <svg id="graph" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid meet"></svg>
       <div class="legend">
-        <div><strong>Categories</strong></div>
-        <div>sources = #6ee7b7</div>
-        <div>entities = #93c5fd</div>
-        <div>concepts = #f9a8d4</div>
-        <div>syntheses = #fde68a</div>
-        <div>root = #c4b5fd</div>
+        <div><strong>分类</strong></div>
+        <div>sources = 资料来源 (#6ee7b7)</div>
+        <div>entities = 实体 (#93c5fd)</div>
+        <div>concepts = 概念 (#f9a8d4)</div>
+        <div>syntheses = 综合结论 (#fde68a)</div>
+        <div>root = 根页面 (#c4b5fd)</div>
       </div>
       <div class="details" id="details">
-        <h2>No node selected</h2>
-        <div class="muted">Click a node or choose one from the left list.</div>
+        <h2>未选择页面</h2>
+        <div class="muted">点击图节点，或从左侧列表选择页面。</div>
       </div>
     </div>
   </div>
@@ -539,6 +539,13 @@ def render_graph_html(graph_data: Dict[str, Any], kb_root: str) -> str:
       concepts: "#f9a8d4",
       syntheses: "#fde68a",
       root: "#c4b5fd",
+    }};
+    const categoryLabelMap = {{
+      sources: "资料来源",
+      entities: "实体",
+      concepts: "概念",
+      syntheses: "综合结论",
+      root: "根页面",
     }};
 
     const nodes = GRAPH_DATA.nodes.map((n, i) => {{
@@ -691,12 +698,12 @@ def render_graph_html(graph_data: Dict[str, Any], kb_root: str) -> str:
 
       details.innerHTML = `
         <h2>${{escapeHtml(node.label)}}</h2>
-        <div><strong>Category:</strong> ${{escapeHtml(node.category)}}</div>
+        <div><strong>分类:</strong> ${{escapeHtml(categoryLabelMap[node.category] || node.category)}}</div>
         <div class="muted"><strong>URI:</strong><br />${{escapeHtml(node.uri)}}</div>
-        <div style="margin-top:8px;"><strong>Inbound:</strong> ${{inbound.length}}</div>
-        <div class="muted">${{escapeHtml(inbound.slice(0, 12).join(", ") || "none")}}</div>
-        <div style="margin-top:8px;"><strong>Outbound:</strong> ${{outbound.length}}</div>
-        <div class="muted">${{escapeHtml(outbound.slice(0, 12).join(", ") || "none")}}</div>
+        <div style="margin-top:8px;"><strong>入链:</strong> ${{inbound.length}}</div>
+        <div class="muted">${{escapeHtml(inbound.slice(0, 12).join(", ") || "无")}}</div>
+        <div style="margin-top:8px;"><strong>出链:</strong> ${{outbound.length}}</div>
+        <div class="muted">${{escapeHtml(outbound.slice(0, 12).join(", ") || "无")}}</div>
       `;
 
       document.querySelectorAll(".node-item").forEach(el => {{

@@ -32,11 +32,19 @@ def plan_bootstrap_paths(kbName: str) -> dict[str, list[str]]:
 
 def build_initial_file_content(fileUri: str) -> str:
   if fileUri.endswith("wiki/index.md"):
-    return "# Index\n\n- [Overview](./overview.md)\n- [Log](./log.md)\n"
+    return (
+      "# 索引\n\n"
+      "- [概览](./overview.md)\n"
+      "- [操作日志](./log.md)\n\n"
+      "## 资料来源\n\n"
+      "## 实体\n\n"
+      "## 概念\n\n"
+      "## 综合结论\n"
+    )
   if fileUri.endswith("wiki/overview.md"):
-    return "# Overview\n\n"
+    return "# 概览\n\n"
   if fileUri.endswith("wiki/log.md"):
-    return "# Log\n\n"
+    return "# 操作日志\n\n"
   return ""
 
 

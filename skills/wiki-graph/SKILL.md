@@ -1,6 +1,6 @@
 ---
 name: wiki-graph
-description: Use when the user asks to generate or refresh remote wiki graph artifacts, including graph.json and graph.html under viking://resources/<kb>/wiki/graph/. Trigger phrases include "为 my-kb 生成 wiki graph", "执行 wiki-graph", "构建 graph.json 和 graph.html", and "先 dry-run 再生成 graph 文件".
+description: 当用户要求生成或刷新远端 wiki 图谱产物（graph.json/graph.html）时使用；中文触发描述优先。
 ---
 
 # Wiki Graph
@@ -9,6 +9,7 @@ description: Use when the user asks to generate or refresh remote wiki graph art
 
 当用户表达以下意图时使用：
 
+- “请为 my-kb 生成 wiki graph”
 - “为 my-kb 生成 wiki graph”
 - “构建 graph.json 和 graph.html”
 - “执行 wiki-graph”

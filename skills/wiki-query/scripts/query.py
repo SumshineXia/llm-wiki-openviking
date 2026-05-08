@@ -24,6 +24,24 @@ LEGACY_LLM_CONFIG_PATHS = [
     Path(__file__).resolve().parent.parent / "config" / "wiki_query.conf.json",
 ]
 
+INDEX_TITLE = "# 索引"
+OVERVIEW_TITLE = "# 概览"
+LOG_TITLE = "# 操作日志\n"
+
+INDEX_SECTIONS = {
+    "sources": "## 资料来源",
+    "entities": "## 实体",
+    "concepts": "## 概念",
+    "syntheses": "## 综合结论",
+}
+
+LEGACY_INDEX_SECTIONS = {
+    "sources": ["## Sources"],
+    "entities": ["## Entities"],
+    "concepts": ["## Concepts"],
+    "syntheses": ["## Syntheses"],
+}
+
 STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "if", "then", "than", "that", "this",
     "is", "are", "was", "were", "be", "been", "being",
@@ -31,6 +49,12 @@ STOPWORDS = {
     "what", "how", "why", "when", "where", "who", "which",
     "do", "does", "did", "can", "could", "should", "would", "may", "might",
     "about", "please", "use", "using", "tell", "me", "explain",
+}
+
+ZH_STOPWORDS = {
+    "这个", "那个", "这些", "那些", "我们", "你们", "他们", "它们",
+    "一个", "一种", "一些", "以及", "并且", "或者", "但是", "如果",
+    "什么", "怎么", "如何", "吗", "呢", "吧", "啊", "呀",
 }
 
 QUESTION_ENDINGS = {
@@ -342,8 +366,24 @@ def extract_index_links(index_text: str) -> Set[str]:
 
 
 def tokenize(text: str) -> Set[str]:
-    tokens = set(re.findall(r"[\w\u4e00-\u9fff]+", text.lower()))
-    return {t for t in tokens if len(t) >= 2 and t not in STOPWORDS}
+    lowered_text = text.lower()
+
+    english_tokens = set(re.findall(r"[a-z0-9_]+", lowered_text))
+    english_tokens = {t for t in english_tokens if len(t) >= 2 and t not in STOPWORDS}
+
+    chinese_chunks = re.findall(r"[\u4e00-\u9fff]+", text)
+    chinese_tokens: Set[str] = set()
+    for chunk in chinese_chunks:
+        normalized_chunk = chunk.strip()
+        if len(normalized_chunk) >= 2 and normalized_chunk not in ZH_STOPWORDS:
+            chinese_tokens.add(normalized_chunk)
+
+        for i in range(len(normalized_chunk) - 1):
+            bigram = normalized_chunk[i : i + 2]
+            if bigram not in ZH_STOPWORDS:
+                chinese_tokens.add(bigram)
+
+    return english_tokens | chinese_tokens
 
 
 def score_page(question_terms: Set[str], uri: str, text: str) -> int:
@@ -360,7 +400,7 @@ def score_page(question_terms: Set[str], uri: str, text: str) -> int:
 
 
 def build_candidate_pages(client: OVFSClient, kb_root: str) -> List[str]:
-    index_text = read_if_exists(client, kb_root + "wiki/index.md", "# Index\n")
+    index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
     linked_targets = sorted(extract_index_links(index_text))
 
     candidates: List[str] = []
@@ -439,26 +479,26 @@ CONTENT:
     joined_pages = "\n\n".join(page_blocks)
 
     return f"""
-You are answering a user question using a remote OpenViking-backed llm-wiki knowledge base.
+你将基于远端 OpenViking 支持的 llm-wiki 知识库回答用户问题。
 
-Follow this schema context:
+请参考以下 schema 上下文：
 
 --- SCHEMA START ---
 {schema_text}
 --- SCHEMA END ---
 
-User question:
+用户问题：
 {question}
 
-Current wiki/overview.md:
+当前 wiki/overview.md：
 --- OVERVIEW START ---
 {overview_text}
 --- OVERVIEW END ---
 
-Relevant wiki pages:
+相关 wiki 页面：
 {joined_pages}
 
-Return ONLY valid JSON with this exact shape:
+仅返回合法 JSON，且严格使用以下结构（JSON key 必须保持英文）：
 
 {{
   "answer_markdown": "full markdown answer grounded in the wiki",
@@ -466,13 +506,14 @@ Return ONLY valid JSON with this exact shape:
   "synthesis_title": "short title for optional saved synthesis"
 }}
 
-Rules:
-- Answer only from the provided wiki context.
-- If the context is incomplete, say what is missing.
-- Prefer concise but useful markdown.
-- Mention key pages or concepts naturally in the answer.
-- Do not include code fences.
-- Do not return extra commentary outside the JSON.
+规则（硬约束）：
+- 默认用简体中文回答。
+- 只能基于提供的 wiki 上下文作答。
+- 上下文不足，用中文说明缺失了什么。
+- 回答尽量简洁但要有信息量。
+- 在回答中自然提及关键页面或概念。
+- 不要输出代码块围栏。
+- 不要在 JSON 之外输出任何额外说明。
 """.strip()
 
 
@@ -514,7 +555,7 @@ def call_llm(
         messages=[
             {
                 "role": "system",
-                "content": "You are a careful knowledge-base query assistant. Output valid JSON only.",
+                "content": "你是严谨的知识库问答助手。默认使用简体中文作答，若上下文不足要明确说明缺失信息。只输出合法 JSON，JSON key 保持英文。",
             },
             {
                 "role": "user",
@@ -544,13 +585,26 @@ def ensure_section(index_text: str, heading: str) -> str:
     return text + "\n"
 
 
-def append_unique_bullet(index_text: str, heading: str, bullet: str) -> str:
+def get_section_heading_by_key(index_text: str, section_key: str) -> tuple[str, str]:
+    canonical_heading = INDEX_SECTIONS[section_key]
+    if canonical_heading in index_text:
+        return canonical_heading, canonical_heading
+
+    for legacy_heading in LEGACY_INDEX_SECTIONS.get(section_key, []):
+        if legacy_heading in index_text:
+            return legacy_heading, canonical_heading
+
+    return canonical_heading, canonical_heading
+
+
+def append_unique_bullet(index_text: str, section_key: str, bullet: str) -> str:
+    heading, _ = get_section_heading_by_key(index_text, section_key)
     index_text = ensure_section(index_text, heading)
 
     if bullet in index_text:
         return index_text
 
-    pattern = re.compile(rf"(^##\s+{re.escape(heading[3:])}\s*$)", re.MULTILINE)
+    pattern = re.compile(rf"(^{re.escape(heading)}\s*$)", re.MULTILINE)
     match = pattern.search(index_text)
     if not match:
         return index_text.rstrip() + f"\n\n{heading}\n{bullet}\n"
@@ -625,19 +679,19 @@ def render_synthesis_markdown(
     answer_markdown: str,
     used_pages: List[str],
 ) -> str:
-    used_section = "\n".join(f"- {uri}" for uri in used_pages) if used_pages else "- none"
+    used_section = "\n".join(f"- {uri}" for uri in used_pages) if used_pages else "- 无"
 
     return f"""# {title}
 
-## Query
+## 问题
 
 {question}
 
-## Answer
+## 回答
 
 {answer_markdown}
 
-## Used Pages
+## 使用的页面
 
 {used_section}
 """
@@ -671,9 +725,9 @@ def main() -> int:
 
     try:
         with OVFSClient(config) as client:
-            overview_text = read_if_exists(client, kb_root + "wiki/overview.md", "# Overview\n")
-            index_text = read_if_exists(client, kb_root + "wiki/index.md", "# Index\n")
-            log_text = read_if_exists(client, kb_root + "wiki/log.md", "# Log\n")
+            overview_text = read_if_exists(client, kb_root + "wiki/overview.md", OVERVIEW_TITLE + "\n")
+            index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
+            log_text = read_if_exists(client, kb_root + "wiki/log.md", LOG_TITLE + "\n")
 
             selected_pages = select_relevant_pages(
                 client=client,
@@ -733,10 +787,10 @@ def main() -> int:
                 write_page(client, synthesis_uri, synthesis_markdown)
 
                 bullet = f"- [[syntheses/{synthesis_slug}.md]] - {synthesis_title}"
-                new_index_text = append_unique_bullet(index_text, "## Syntheses", bullet)
+                new_index_text = append_unique_bullet(index_text, "syntheses", bullet)
                 new_log_text = append_log_entry(
                     log_text,
-                    f"saved synthesis {synthesis_slug} into wiki/syntheses/{synthesis_slug}.md",
+                    f"已保存综合结论 {synthesis_slug} 到 wiki/syntheses/{synthesis_slug}.md",
                 )
 
                 write_page(client, kb_root + "wiki/index.md", new_index_text)
