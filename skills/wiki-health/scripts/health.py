@@ -138,6 +138,54 @@ def basename_without_ext(uri: str) -> str:
   return name
 
 
+def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> str | None:
+    if not uri.endswith("/"):
+        uri = uri.rstrip("/") + "/"
+    try:
+        children = client.ls(uri, recursive=False)
+    except Exception:
+        return None
+
+    candidates: list[str] = []
+
+    for child in children:
+        childUri: str | None = None
+        childIsDir: bool | None = None
+
+        if isinstance(child, str):
+            childUri = child
+        elif isinstance(child, dict):
+            childUri = child.get("uri") or child.get("path")
+            if isinstance(child.get("isDir"), bool):
+                childIsDir = child["isDir"]
+
+        if not childUri or not isinstance(childUri, str):
+            continue
+
+        name = PurePosixPath(childUri).name
+
+        if name == "abstract.md":
+            continue
+
+        if not name.endswith(extensions):
+            continue
+
+        if childIsDir is None:
+            childStat = get_uri_stat(client, childUri)
+            childIsDir = bool(childStat and childStat.get("isDir", False))
+
+        if childIsDir:
+            continue
+
+        candidates.append(childUri)
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name.startswith("tmp"):
+            return candidate
+
+    return candidates[0] if candidates else None
+
+
 def get_uri_stat(client: OVFSClient, uri: str) -> dict[str, Any] | None:
   try:
     return client.stat(uri)
@@ -149,49 +197,56 @@ def get_uri_stat(client: OVFSClient, uri: str) -> dict[str, Any] | None:
 
 
 def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
-  stat = get_uri_stat(client, uri)
-  if not stat:
+    stat = get_uri_stat(client, uri)
+    if not stat:
+        return None
+
+    if not stat.get("isDir", False):
+        return uri
+
+    direct_child = find_direct_content_child(client, uri, extensions=(".md",))
+    if direct_child:
+        return direct_child
+
+    basename = PurePosixPath(uri.rstrip("/")).name
+    if basename:
+        nestedCandidate = uri.rstrip("/") + f"/{basename}"
+        nestedStat = get_uri_stat(client, nestedCandidate)
+        if nestedStat and not nestedStat.get("isDir", False):
+            return nestedCandidate
+
+    try:
+        children = client.ls(uri.rstrip("/") + "/", recursive=False)
+    except Exception:
+        children = []
+
+    for child in children:
+        childUri: str | None = None
+        childIsDir: bool | None = None
+
+        if isinstance(child, str):
+            childUri = child
+        elif isinstance(child, dict):
+            childUri = child.get("uri") or child.get("path")
+            if isinstance(child.get("isDir"), bool):
+                childIsDir = child["isDir"]
+
+        if not childUri or not isinstance(childUri, str):
+            continue
+        if not childUri.endswith(".md"):
+            continue
+        name = PurePosixPath(childUri).name
+        if name == "abstract.md":
+            continue
+
+        if childIsDir is None:
+            childStat = get_uri_stat(client, childUri)
+            childIsDir = bool(childStat and childStat.get("isDir", False))
+
+        if not childIsDir:
+            return childUri
+
     return None
-
-  if not stat.get("isDir", False):
-    return uri
-
-  basename = PurePosixPath(uri.rstrip("/")).name
-  if basename:
-    nestedCandidate = uri.rstrip("/") + f"/{basename}"
-    nestedStat = get_uri_stat(client, nestedCandidate)
-    if nestedStat and not nestedStat.get("isDir", False):
-      return nestedCandidate
-
-  try:
-    children = client.ls(uri.rstrip("/") + "/", recursive=False)
-  except Exception:
-    children = []
-
-  for child in children:
-    childUri: str | None = None
-    childIsDir: bool | None = None
-
-    if isinstance(child, str):
-      childUri = child
-    elif isinstance(child, dict):
-      childUri = child.get("uri") or child.get("path")
-      if isinstance(child.get("isDir"), bool):
-        childIsDir = child["isDir"]
-
-    if not childUri or not isinstance(childUri, str):
-      continue
-    if not childUri.endswith(".md"):
-      continue
-
-    if childIsDir is None:
-      childStat = get_uri_stat(client, childUri)
-      childIsDir = bool(childStat and childStat.get("isDir", False))
-
-    if not childIsDir:
-      return childUri
-
-  return None
 
 
 def get_log_match_stem(uri: str, sourcesRoot: str) -> str:
@@ -339,11 +394,48 @@ def check_source_log_coverage(client: OVFSClient, kbRoot: str) -> list[str]:
   return missingInLog
 
 
+def check_nested_resource_dirs(client: OVFSClient, kbRoot: str) -> list[str]:
+    wikiUri = kbRoot + "wiki/"
+    try:
+        items = client.ls(wikiUri, recursive=True)
+    except Exception:
+        return []
+
+    nestedDirs: list[str] = []
+
+    for item in items:
+        uri: str | None = None
+
+        if isinstance(item, str):
+            uri = item
+        elif isinstance(item, dict):
+            uri = item.get("uri") or item.get("path")
+
+        if not uri or not isinstance(uri, str):
+            continue
+        if not uri.startswith(kbRoot):
+            continue
+
+        relFromWiki = uri[len(wikiUri):]
+
+        parts = [p for p in relFromWiki.split("/") if p]
+        if len(parts) < 2:
+            continue
+
+        for i in range(len(parts) - 1):
+            if parts[i] == parts[i + 1]:
+                nestedDirs.append(uri)
+                break
+
+    return sorted(set(nestedDirs))
+
+
 def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
   missingDirs, missingFiles = check_required_structure(client, kbRoot)
   emptyKeyPages = check_empty_key_pages(client, kbRoot)
   linkedTargets, brokenIndexTargets = check_index_targets(client, kbRoot)
   missingSourceLogEntries = check_source_log_coverage(client, kbRoot)
+  nestedDirs = check_nested_resource_dirs(client, kbRoot)
 
   allWikiPages = list_markdown_pages(client, kbRoot + "wiki/")
   allSourcePages = list_markdown_pages(client, kbRoot + "wiki/sources/")
@@ -377,6 +469,9 @@ def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
       f"来源页面未记录到 wiki/log.md：{len(missingSourceLogEntries)}"
     )
 
+  if nestedDirs:
+    warnings.append(f"发现同名嵌套资源目录（旧版本错误写入）：{len(nestedDirs)}")
+
   status = "ok" if not errors else "error"
 
   return {
@@ -398,6 +493,7 @@ def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
       "empty_key_pages": emptyKeyPages,
       "broken_index_targets": brokenIndexTargets,
       "missing_source_log_entries": missingSourceLogEntries,
+      "nested_resource_dirs": nestedDirs,
     },
   }
 
