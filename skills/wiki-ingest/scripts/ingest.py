@@ -164,6 +164,54 @@ def get_uri_stat(client: OVFSClient, uri: str) -> Dict[str, Any] | None:
         raise
 
 
+def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> str | None:
+    if not uri.endswith("/"):
+        uri = uri.rstrip("/") + "/"
+    try:
+        children = client.ls(uri, recursive=False)
+    except Exception:
+        return None
+
+    candidates: list[str] = []
+
+    for child in children:
+        child_uri: str | None = None
+        child_is_dir: bool | None = None
+
+        if isinstance(child, str):
+            child_uri = child
+        elif isinstance(child, dict):
+            child_uri = child.get("uri") or child.get("path")
+            if isinstance(child.get("isDir"), bool):
+                child_is_dir = child["isDir"]
+
+        if not child_uri or not isinstance(child_uri, str):
+            continue
+
+        name = PurePosixPath(child_uri).name
+
+        if name == "abstract.md":
+            continue
+
+        if not name.endswith(extensions):
+            continue
+
+        if child_is_dir is None:
+            child_stat = get_uri_stat(client, child_uri)
+            child_is_dir = bool(child_stat and child_stat.get("isDir", False))
+
+        if child_is_dir:
+            continue
+
+        candidates.append(child_uri)
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name.startswith("tmp"):
+            return candidate
+
+    return candidates[0] if candidates else None
+
+
 def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
     stat = get_uri_stat(client, uri)
     if not stat:
@@ -171,6 +219,10 @@ def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
 
     if not stat.get("isDir", False):
         return uri
+
+    direct_child = find_direct_content_child(client, uri, extensions=(".md",))
+    if direct_child:
+        return direct_child
 
     basename = PurePosixPath(uri.rstrip("/")).name
     if not basename:
@@ -201,6 +253,9 @@ def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
             continue
         if not child_uri.endswith(".md"):
             continue
+        name = PurePosixPath(child_uri).name
+        if name == "abstract.md":
+            continue
 
         if child_is_dir is None:
             child_stat = get_uri_stat(client, child_uri)
@@ -220,16 +275,11 @@ def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:
     if not stat.get("isDir", False):
         return uri, False
 
-    basename = PurePosixPath(uri.rstrip("/")).name
-    if not basename:
-        return uri, False
+    content_child = find_direct_content_child(client, uri, extensions=(".md",))
+    if content_child:
+        return content_child, False
 
-    nested_uri = uri.rstrip("/") + f"/{basename}"
-    nested_stat = get_uri_stat(client, nested_uri)
-    if nested_stat and not nested_stat.get("isDir", False):
-        return nested_uri, False
-
-    return nested_uri, True
+    return uri, True
 
 
 def list_markdown_pages(client: OVFSClient, root_uri: str) -> List[str]:
