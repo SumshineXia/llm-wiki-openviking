@@ -35,6 +35,54 @@ def build_kb_root(kb_name: str) -> str:
     return f"viking://resources/{normalized_name}/"
 
 
+def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> str | None:
+    if not uri.endswith("/"):
+        uri = uri.rstrip("/") + "/"
+    try:
+        children = client.ls(uri, recursive=False)
+    except Exception:
+        return None
+
+    candidates: List[str] = []
+
+    for child in children:
+        child_uri: Optional[str] = None
+        child_is_dir: Optional[bool] = None
+
+        if isinstance(child, str):
+            child_uri = child
+        elif isinstance(child, dict):
+            child_uri = child.get("uri") or child.get("path")
+            if isinstance(child.get("isDir"), bool):
+                child_is_dir = child["isDir"]
+
+        if not child_uri or not isinstance(child_uri, str):
+            continue
+
+        name = PurePosixPath(child_uri).name
+
+        if name == "abstract.md":
+            continue
+
+        if not name.endswith(extensions):
+            continue
+
+        if child_is_dir is None:
+            child_stat = get_uri_stat(client, child_uri)
+            child_is_dir = bool(child_stat and child_stat.get("isDir", False))
+
+        if child_is_dir:
+            continue
+
+        candidates.append(child_uri)
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name.startswith("tmp"):
+            return candidate
+
+    return candidates[0] if candidates else None
+
+
 def get_uri_stat(client: OVFSClient, uri: str) -> Dict[str, Any] | None:
     try:
         return client.stat(uri)
@@ -52,6 +100,10 @@ def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
 
     if not stat.get("isDir", False):
         return uri
+
+    direct_child = find_direct_content_child(client, uri, extensions=(".md",))
+    if direct_child:
+        return direct_child
 
     basename = PurePosixPath(uri.rstrip("/")).name
     if not basename:
@@ -81,6 +133,9 @@ def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
         if not child_uri or not isinstance(child_uri, str):
             continue
         if not child_uri.endswith(".md"):
+            continue
+        name = PurePosixPath(child_uri).name
+        if name == "abstract.md":
             continue
 
         if child_is_dir is None:
@@ -403,6 +458,42 @@ def check_stub_pages(page_map: Dict[str, str]) -> List[str]:
     return sorted(stubs)
 
 
+def check_nested_resource_dirs(client: OVFSClient, kb_root: str) -> List[str]:
+    wiki_uri = kb_root + "wiki/"
+    try:
+        items = client.ls(wiki_uri, recursive=True)
+    except Exception:
+        return []
+
+    nested_dirs: List[str] = []
+
+    for item in items:
+        uri: Optional[str] = None
+
+        if isinstance(item, str):
+            uri = item
+        elif isinstance(item, dict):
+            uri = item.get("uri") or item.get("path")
+
+        if not uri or not isinstance(uri, str):
+            continue
+        if not uri.startswith(kb_root):
+            continue
+
+        rel_from_wiki = uri[len(wiki_uri):]
+
+        parts = [p for p in rel_from_wiki.split("/") if p]
+        if len(parts) < 2:
+            continue
+
+        for i in range(len(parts) - 1):
+            if parts[i] == parts[i + 1]:
+                nested_dirs.append(uri)
+                break
+
+    return sorted(set(nested_dirs))
+
+
 def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
     all_pages = list_markdown_pages(client, kb_root + "wiki/")
     unexpected_wiki_root_entries = check_unexpected_wiki_root_entries(client, kb_root)
@@ -419,6 +510,7 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
     no_outbound_links = check_pages_without_outbound_links(kb_root, page_map)
     duplicate_titles = check_duplicate_titles(page_map)
     stub_pages = check_stub_pages(page_map)
+    nested_dirs = check_nested_resource_dirs(client, kb_root)
 
     errors: List[str] = []
     warnings: List[str] = []
@@ -441,6 +533,9 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
     if stub_pages:
         warnings.append(f"占位或近似空页面：{len(stub_pages)}")
 
+    if nested_dirs:
+        warnings.append(f"发现同名嵌套资源目录（旧版本错误写入）：{len(nested_dirs)}")
+
     status = "ok"
     if errors:
         status = "error"
@@ -458,6 +553,7 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
             "pages_without_outbound_links": len(no_outbound_links),
             "duplicate_titles": len(duplicate_titles),
             "stub_pages": len(stub_pages),
+            "nested_resource_dirs": len(nested_dirs),
         },
         "errors": errors,
         "warnings": warnings,
@@ -468,6 +564,7 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
             "pages_without_outbound_links": no_outbound_links,
             "duplicate_titles": duplicate_titles,
             "stub_pages": stub_pages,
+            "nested_resource_dirs": nested_dirs,
         },
     }
 
