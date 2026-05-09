@@ -23,14 +23,14 @@ def test_build_graph_output_paths_returns_wiki_graph_targets() -> None:
   kb_root = "viking://resources/my-kb/"
   graph_json_uri, graph_html_uri = build_graph_output_paths(kb_root)
 
-  assert graph_json_uri == "viking://resources/my-kb/wiki/graph/graph.json"
-  assert graph_html_uri == "viking://resources/my-kb/wiki/graph/graph.html"
+  assert graph_json_uri == "viking://resources/my-kb/graph/graph.json"
+  assert graph_html_uri == "viking://resources/my-kb/graph/graph.html"
 
 
 def test_build_graph_output_dir_uri_returns_wiki_graph_dir() -> None:
   kb_root = "viking://resources/my-kb/"
 
-  assert build_graph_output_dir_uri(kb_root) == "viking://resources/my-kb/wiki/graph/"
+  assert build_graph_output_dir_uri(kb_root) == "viking://resources/my-kb/graph/"
 
 
 def test_ensure_graph_output_dir_uses_wiki_graph_dir() -> None:
@@ -50,7 +50,7 @@ def test_ensure_graph_output_dir_uses_wiki_graph_dir() -> None:
   assert calls == [
     (
       fake_client,
-      "viking://resources/my-kb/wiki/graph/",
+      "viking://resources/my-kb/graph/",
       "wiki graph output dir",
     )
   ]
