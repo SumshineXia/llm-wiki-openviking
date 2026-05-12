@@ -205,6 +205,12 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
 
         candidates.append(child_uri)
 
+    parent_name = PurePosixPath(uri.rstrip("/")).name
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name == parent_name:
+            return candidate
+
     for candidate in candidates:
         if PurePosixPath(candidate).name.startswith("tmp"):
             return candidate
@@ -267,6 +273,12 @@ def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
     return None
 
 
+def expected_content_child_uri(uri: str) -> str:
+    normalized = uri.rstrip("/")
+    basename = PurePosixPath(normalized).name
+    return f"{normalized}/{basename}"
+
+
 def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:
     stat = get_uri_stat(client, uri)
     if not stat:
@@ -275,11 +287,16 @@ def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:
     if not stat.get("isDir", False):
         return uri, False
 
+    same_name_child = expected_content_child_uri(uri)
+    same_name_stat = get_uri_stat(client, same_name_child)
+    if same_name_stat and not same_name_stat.get("isDir", False):
+        return same_name_child, False
+
     content_child = find_direct_content_child(client, uri, extensions=(".md",))
     if content_child:
         return content_child, False
 
-    return uri, True
+    return same_name_child, True
 
 
 def list_markdown_pages(client: OVFSClient, root_uri: str) -> List[str]:
@@ -586,6 +603,9 @@ def append_overview_note(overview_text: str, note: str, source_title: str) -> st
     if existing_block_pattern.search(overview_text):
         return overview_text
 
+    if note.startswith("### "):
+        return overview_text.rstrip() + "\n\n" + note + "\n"
+
     stamp = now_iso()
     block = f"\n### {source_title} ({stamp})\n\n{note}\n"
     return overview_text.rstrip() + block + "\n"
@@ -606,16 +626,18 @@ def append_log_entry(log_text: str, entry: str) -> str:
 def write_page(client: OVFSClient, uri: str, markdown: str) -> None:
     target_uri, should_create = resolve_write_target_uri(client, uri)
     if should_create:
-        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as fp:
-            fp.write(markdown)
-            local_file_path = fp.name
+        file_name = PurePosixPath(target_uri).name or "untitled.md"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_file_path = os.path.join(temp_dir, file_name)
+            with open(local_file_path, "w", encoding="utf-8") as fp:
+                fp.write(markdown)
 
-        client.add_local_resource(
-            file_path=local_file_path,
-            to=target_uri,
-            reason="wiki ingest create page",
-            wait=False,
-        )
+            client.add_local_resource(
+                file_path=local_file_path,
+                to=target_uri,
+                reason="wiki ingest create page",
+                wait=False,
+            )
         return
 
     client.write_text(target_uri, markdown, create=False, wait=True)

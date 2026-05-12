@@ -76,6 +76,12 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
 
         candidates.append(child_uri)
 
+    parent_name = PurePosixPath(uri.rstrip("/")).name
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name == parent_name:
+            return candidate
+
     for candidate in candidates:
         if PurePosixPath(candidate).name.startswith("tmp"):
             return candidate
@@ -510,7 +516,7 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
     no_outbound_links = check_pages_without_outbound_links(kb_root, page_map)
     duplicate_titles = check_duplicate_titles(page_map)
     stub_pages = check_stub_pages(page_map)
-    nested_dirs = check_nested_resource_dirs(client, kb_root)
+    _nested_dirs = check_nested_resource_dirs(client, kb_root)
 
     errors: List[str] = []
     warnings: List[str] = []
@@ -533,9 +539,6 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
     if stub_pages:
         warnings.append(f"占位或近似空页面：{len(stub_pages)}")
 
-    if nested_dirs:
-        warnings.append(f"发现同名嵌套资源目录（旧版本错误写入）：{len(nested_dirs)}")
-
     status = "ok"
     if errors:
         status = "error"
@@ -553,7 +556,6 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
             "pages_without_outbound_links": len(no_outbound_links),
             "duplicate_titles": len(duplicate_titles),
             "stub_pages": len(stub_pages),
-            "nested_resource_dirs": len(nested_dirs),
         },
         "errors": errors,
         "warnings": warnings,
@@ -564,7 +566,6 @@ def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
             "pages_without_outbound_links": no_outbound_links,
             "duplicate_titles": duplicate_titles,
             "stub_pages": stub_pages,
-            "nested_resource_dirs": nested_dirs,
         },
     }
 

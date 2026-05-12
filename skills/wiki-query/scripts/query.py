@@ -5,7 +5,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -57,18 +56,6 @@ ZH_STOPWORDS = {
     "什么", "怎么", "如何", "吗", "呢", "吧", "啊", "呀",
 }
 
-QUESTION_ENDINGS = {
-    "什么",
-    "吗",
-    "呢",
-    "么",
-    "嘛",
-    "如何",
-    "怎么样",
-    "怎样",
-}
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -81,29 +68,58 @@ def slugify(text: str) -> str:
     return "-".join(tokens)
 
 
-def condense_question_for_slug(question: str) -> str:
-    normalized = question.strip().rstrip("？?！!。；;，,")
+BANNED_TITLE_PREFIXES = re.compile(
+    r"^(?:"
+    r"关于(?:的|之)?|"
+    r"这份文档(?:的|是)?|"
+    r"这个文档(?:的|是)?|"
+    r"该文档(?:的|是)?|"
+    r"本文档(?:的|是)?|"
+    r"此文档(?:的|是)?|"
+    r"这个问题(?:的|是)?"
+    r")\s*"
+)
+BANNED_FULL_TITLES = {
+    "相关内容",
+    "相关文档",
+    "相关信息",
+    "综合结论",
+    "回答内容",
+    "问答内容",
+    "问题回答",
+}
 
-    for ending in sorted(QUESTION_ENDINGS, key=len, reverse=True):
-        if normalized.endswith(ending):
-            normalized = normalized[: -len(ending)].rstrip("？?！!。；;，,")
-            break
 
-    return normalized or question.strip()
+def normalize_synthesis_title(title: str, fallback: str = "综合结论", max_chars: int = 15) -> str:
+    text = title.strip()
+    text = re.sub(r"^#+\s*", "", text)
+    text = re.sub(r"[*_~`]", "", text)
+    text = BANNED_TITLE_PREFIXES.sub("", text)
+    text = re.sub(r"^[的是]\s*", "", text)
+    text = text.strip("。，、；：？！,. ;:!?\n")
+    if text.strip().lower() in BANNED_FULL_TITLES or not text.strip():
+        return fallback
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip("，,。；、:： ")
+    return text.strip() or fallback
 
 
-def build_synthesis_target(slug: str | None, question: str) -> str:
+def expected_content_child_uri(uri: str) -> str:
+    normalized = uri.rstrip("/")
+    basename = PurePosixPath(normalized).name
+    return f"{normalized}/{basename}"
+
+
+def build_synthesis_target(slug: str | None, synthesis_title: str) -> str:
     if slug and slug.strip():
         return f"wiki/syntheses/{slugify(slug)}.md"
 
-    condensed_question = condense_question_for_slug(question)
-    condensed = slugify(condensed_question)
-    if condensed:
-        condensed = condensed[:48].strip("-")
-
+    normalized_title = normalize_synthesis_title(synthesis_title)
+    stem = slugify(normalized_title)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    if condensed:
-        return f"wiki/syntheses/{condensed}-{timestamp}.md"
+    if stem:
+        stem = stem[:48].strip("-")
+        return f"wiki/syntheses/{stem}-{timestamp}.md"
 
     return f"wiki/syntheses/query-{timestamp}.md"
 
@@ -229,6 +245,12 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
             continue
 
         candidates.append(child_uri)
+
+    parent_name = PurePosixPath(uri.rstrip("/")).name
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name == parent_name:
+            return candidate
 
     for candidate in candidates:
         if PurePosixPath(candidate).name.startswith("tmp"):
@@ -558,7 +580,7 @@ CONTENT:
 {{
   "answer_markdown": "full markdown answer grounded in the wiki",
   "used_pages": ["uri1", "uri2"],
-  "synthesis_title": "short title for optional saved synthesis"
+   "synthesis_title": "15字以内中文标题，必须根据 answer_markdown 的核心内容总结，不要复述用户问题。不要把疑问句改成陈述句。不要使用'这份文档''这个问题''关于'等空泛标题。适合作为文件名和 wiki 标题。"
 }}
 
 规则（硬约束）：
@@ -688,39 +710,21 @@ def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:
     if not stat.get("isDir", False):
         return uri, False
 
+    same_name_child = expected_content_child_uri(uri)
+    same_name_stat = get_uri_stat(client, same_name_child)
+    if same_name_stat and not same_name_stat.get("isDir", False):
+        return same_name_child, False
+
     content_child = find_direct_content_child(client, uri, extensions=(".md",))
     if content_child:
         return content_child, False
 
-    return uri, True
+    return same_name_child, True
 
 
 def write_page(client: OVFSClient, uri: str, markdown: str) -> None:
     target_uri, should_create = resolve_write_target_uri(client, uri)
-
-    if should_create:
-        if hasattr(client, "add_local_resource"):
-            with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as fp:
-                fp.write(markdown)
-                local_file_path = fp.name
-            try:
-                client.add_local_resource(
-                    file_path=local_file_path,
-                    to=target_uri,
-                    reason="wiki query create synthesis",
-                    wait=False,
-                )
-            finally:
-                try:
-                    os.unlink(local_file_path)
-                except OSError:
-                    pass
-            return
-
-        client.write_text(target_uri, markdown, create=True, wait=False)
-        return
-
-    client.write_text(target_uri, markdown, create=False, wait=False)
+    client.write_text(target_uri, markdown, create=should_create, wait=True)
 
 
 def render_synthesis_markdown(
@@ -804,7 +808,8 @@ def main() -> int:
 
             answer_markdown = str(llm_result.get("answer_markdown", "")).strip()
             used_pages = llm_result.get("used_pages", [])
-            synthesis_title = str(llm_result.get("synthesis_title", "")).strip() or args.question
+            raw_synthesis_title = str(llm_result.get("synthesis_title", "")).strip()
+            synthesis_title = normalize_synthesis_title(raw_synthesis_title, fallback="综合结论")
 
             if not answer_markdown:
                 raise RuntimeError("LLM did not return answer_markdown")
@@ -826,7 +831,7 @@ def main() -> int:
             }
 
             if args.save:
-                synthesis_target = build_synthesis_target(args.slug, args.question)
+                synthesis_target = build_synthesis_target(args.slug, synthesis_title)
                 synthesis_slug = PurePosixPath(synthesis_target).stem
                 synthesis_uri = kb_root + synthesis_target
                 synthesis_markdown = render_synthesis_markdown(

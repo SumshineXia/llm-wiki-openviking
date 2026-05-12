@@ -10,6 +10,7 @@ skill_names = [
   "wiki-lint",
   "wiki-graph",
   "wiki-upload-source",
+  "wiki-profile",
 ]
 
 

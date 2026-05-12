@@ -94,6 +94,12 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
 
         candidates.append(child_uri)
 
+    parent_name = PurePosixPath(uri.rstrip("/")).name
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name == parent_name:
+            return candidate
+
     for candidate in candidates:
         if PurePosixPath(candidate).name.startswith("tmp"):
             return candidate
@@ -820,6 +826,12 @@ def render_graph_html(graph_data: Dict[str, Any], kb_root: str) -> str:
 """
 
 
+def expected_content_child_uri(uri: str) -> str:
+    normalized = uri.rstrip("/")
+    basename = PurePosixPath(normalized).name
+    return f"{normalized}/{basename}"
+
+
 def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:
     stat = get_uri_stat(client, uri)
     if not stat:
@@ -828,67 +840,37 @@ def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:
     if not stat.get("isDir", False):
         return uri, False
 
-    basename = PurePosixPath(uri.rstrip("/")).name
-    if not basename:
-        return uri, False
+    same_name_child = expected_content_child_uri(uri)
+    same_name_stat = get_uri_stat(client, same_name_child)
+    if same_name_stat and not same_name_stat.get("isDir", False):
+        return same_name_child, False
 
-    nested_uri = uri.rstrip("/") + f"/{basename}"
-    nested_stat = get_uri_stat(client, nested_uri)
-    if nested_stat and not nested_stat.get("isDir", False):
-        return nested_uri, False
+    extension = PurePosixPath(uri.rstrip("/")).suffix
+    content_child = find_direct_content_child(client, uri, extensions=(extension,) if extension else (".md",))
+    if content_child:
+        return content_child, False
 
-    try:
-        children = client.ls(uri.rstrip("/") + "/", recursive=False)
-    except Exception:
-        children = []
+    fallback_child = find_direct_content_child(client, uri, extensions=(".md", ".json", ".html"))
+    if fallback_child:
+        return fallback_child, False
 
-    for child in children:
-        child_uri: Optional[str] = None
-        child_is_dir: Optional[bool] = None
-
-        if isinstance(child, str):
-            child_uri = child
-        elif isinstance(child, dict):
-            child_uri = child.get("uri") or child.get("path")
-            if isinstance(child.get("isDir"), bool):
-                child_is_dir = child["isDir"]
-
-        if not child_uri or not isinstance(child_uri, str):
-            continue
-
-        if child_is_dir is None:
-            child_stat = get_uri_stat(client, child_uri)
-            child_is_dir = bool(child_stat and child_stat.get("isDir", False))
-
-        if not child_is_dir:
-            return child_uri, False
-
-    return uri, True
+    return same_name_child, True
 
 
 def write_page(client: OVFSClient, uri: str, content: str, reason: str) -> None:
     target_uri, should_create = resolve_write_target_uri(client, uri)
-
     if should_create:
-        if hasattr(client, "add_local_resource"):
-            with tempfile.NamedTemporaryFile("w", suffix=".md" if uri.endswith(".md") else ".json", delete=False, encoding="utf-8") as fp:
-                fp.write(content)
-                local_file_path = fp.name
-            try:
-                client.add_local_resource(
-                    file_path=local_file_path,
-                    to=target_uri,
-                    reason=reason,
-                    wait=False,
-                )
-            finally:
-                try:
-                    os.unlink(local_file_path)
-                except OSError:
-                    pass
-            return
+        suffix = ".md" if target_uri.endswith(".md") else ".json"
+        with tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False, encoding="utf-8") as fp:
+            fp.write(content)
+            local_file_path = fp.name
 
-        client.write_text(target_uri, content, create=True, wait=True)
+        client.add_local_resource(
+            file_path=local_file_path,
+            to=target_uri,
+            reason=reason,
+            wait=False,
+        )
         return
 
     client.write_text(target_uri, content, create=False, wait=True)

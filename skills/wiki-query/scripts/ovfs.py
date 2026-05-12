@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -410,29 +410,19 @@ class OVFSClient:
         wait: bool = True,
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
-        suffix = Path(uri).suffix or ".md"
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=suffix,
-            delete=False,
-        ) as tmp:
-            tmp.write(content)
-            temp_path = tmp.name
-
-        try:
+        basename = PurePosixPath(uri).name or f"unnamed{Path(uri).suffix or '.md'}"
+        upload_to = _resolve_upload_target_for_create(uri)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = os.path.join(tmpdir, basename)
+            with open(local_path, "w", encoding="utf-8") as tmp:
+                tmp.write(content)
             return self.add_local_resource(
-                file_path=temp_path,
-                to=uri,
+                file_path=local_path,
+                to=upload_to,
                 wait=False,
                 timeout=None,
                 strict=True,
             )
-        finally:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
 
     def write_text(
         self,
@@ -531,6 +521,15 @@ class OVFSClient:
             errors.append(f"webdav-put-after-replace failed: {exc}")
 
         raise OVFSHTTPError(" | ".join(errors))
+
+
+def _resolve_upload_target_for_create(uri: str) -> str:
+    basename = PurePosixPath(uri).name
+    normalized = uri.rstrip("/")
+    parent_uri = normalized.rsplit("/", 1)[0] + "/"
+    if PurePosixPath(parent_uri.rstrip("/")).name == basename:
+        return parent_uri
+    return uri
 
 
 def ensure_dir(client: OVFSClient, uri: str, description: Optional[str] = None) -> None:

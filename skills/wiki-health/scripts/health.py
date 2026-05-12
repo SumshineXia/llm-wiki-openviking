@@ -179,6 +179,12 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
 
         candidates.append(childUri)
 
+    parent_name = PurePosixPath(uri.rstrip("/")).name
+
+    for candidate in candidates:
+        if PurePosixPath(candidate).name == parent_name:
+            return candidate
+
     for candidate in candidates:
         if PurePosixPath(candidate).name.startswith("tmp"):
             return candidate
@@ -468,9 +474,6 @@ def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
     warnings.append(
       f"来源页面未记录到 wiki/log.md：{len(missingSourceLogEntries)}"
     )
-
-  if nestedDirs:
-    warnings.append(f"发现同名嵌套资源目录（旧版本错误写入）：{len(nestedDirs)}")
 
   status = "ok" if not errors else "error"
 
