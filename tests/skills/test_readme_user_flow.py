@@ -61,3 +61,23 @@ def testReadmeContainsCliAndJsonStabilityConvention() -> None:
   readmePath = Path(__file__).resolve().parents[2] / "README.md"
   readmeText = readmePath.read_text(encoding="utf-8")
   assert "保持 CLI 参数、目录结构、JSON 字段名不变。" in readmeText
+
+
+def testReadmeContainsWikiUploadSourceAndWikiSaveInstallEntries() -> None:
+  readmePath = Path(__file__).resolve().parents[2] / "README.md"
+  readmeText = readmePath.read_text(encoding="utf-8")
+  assert "skills/wiki-upload-source" in readmeText
+  assert "skills/wiki-save" in readmeText
+
+
+def testReadmeContainsQueryConfirmThenWikiSaveFlow() -> None:
+  readmePath = Path(__file__).resolve().parents[2] / "README.md"
+  readmeText = readmePath.read_text(encoding="utf-8")
+  assert "query -> 确认 -> wiki-save" in readmeText
+  assert "legacy `wiki-query --save` 会重新检索并再次调用 LLM" in readmeText
+
+
+def testReadmeDoesNotClaimSevenCommonSkills() -> None:
+  readmePath = Path(__file__).resolve().parents[2] / "README.md"
+  readmeText = readmePath.read_text(encoding="utf-8")
+  assert "7 个常用 skill" not in readmeText

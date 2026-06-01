@@ -11,6 +11,7 @@ skill_names = [
   "wiki-graph",
   "wiki-upload-source",
   "wiki-profile",
+  "wiki-save",
 ]
 
 

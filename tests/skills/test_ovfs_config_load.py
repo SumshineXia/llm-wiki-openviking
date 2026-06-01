@@ -8,6 +8,8 @@ scriptsDir = repoRoot / "skills" / "wiki-health" / "scripts"
 ovfsPath = scriptsDir / "ovfs.py"
 if str(scriptsDir) not in sys.path:
   sys.path.insert(0, str(scriptsDir))
+import common as common_module
+
 spec = spec_from_file_location("wiki_health_ovfs", ovfsPath)
 if spec is None or spec.loader is None:
   raise RuntimeError("无法加载 skills/wiki-health/scripts/ovfs.py")
@@ -41,7 +43,9 @@ def test_load_falls_back_to_defaults_and_ignores_legacy_ovcli_conf(
   assert config.timeout == 30.0
 
 
-def test_load_prefers_env_overrides(monkeypatch) -> None:
+def test_load_ignores_env_overrides(tmp_path: Path, monkeypatch) -> None:
+  monkeypatch.setattr(common_module, "DEFAULT_CONFIG_PATH", tmp_path / "config.json")
+  monkeypatch.setattr(common_module, "DEFAULT_CURRENT_PROFILE_PATH", tmp_path / "current")
   monkeypatch.setenv("OPENVIKING_URL", "http://env-host:1933")
   monkeypatch.setenv("OPENVIKING_API_KEY", "env-key")
   monkeypatch.setenv("OPENVIKING_ACCOUNT_ID", "env-account")
@@ -50,11 +54,11 @@ def test_load_prefers_env_overrides(monkeypatch) -> None:
 
   config = OVFSConfig.load()
 
-  assert config.url == "http://env-host:1933"
-  assert config.api_key == "env-key"
-  assert config.account_id == "env-account"
-  assert config.user_id == "env-user"
-  assert config.timeout == 45.5
+  assert config.url in ("http://localhost:1933", "http://127.0.0.1:1933")
+  assert config.api_key is None
+  assert config.account_id is None
+  assert config.user_id is None
+  assert config.timeout == 30.0
 
 
 def test_load_reads_profile_account_user_from_v2_config(tmp_path: Path, monkeypatch) -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +28,6 @@ def build_kb_root(kbName: str) -> str:
 def resolve_config_path(config_path: str | None = None) -> Path:
   if config_path:
     return Path(config_path).expanduser()
-  env_path = os.getenv("LLM_WIKI_CONFIG", "").strip()
-  if env_path:
-    return Path(env_path).expanduser()
   return DEFAULT_CONFIG_PATH
 
 
@@ -39,18 +35,6 @@ def _read_text_file(path: Path) -> str:
   if not path.exists():
     return ""
   return path.read_text(encoding="utf-8").strip()
-
-
-def _find_profile_from_parent(start: Path) -> str:
-  current = start
-  while True:
-    marker = current / ".llm-wiki-profile"
-    marker_value = _read_text_file(marker)
-    if marker_value:
-      return marker_value
-    if current.parent == current:
-      return ""
-    current = current.parent
 
 
 def _to_flat_config(raw: dict[str, Any], profile_name: str | None) -> dict[str, Any]:
@@ -66,14 +50,10 @@ def _to_flat_config(raw: dict[str, Any], profile_name: str | None) -> dict[str, 
       if name:
         profile_map[name] = item
 
-  env_profile = os.getenv("LLM_WIKI_PROFILE", "").strip()
-  marker_profile = _find_profile_from_parent(Path.cwd())
   current_profile = _read_text_file(DEFAULT_CURRENT_PROFILE_PATH)
 
   selected_profile_name = (
     (profile_name or "").strip()
-    or env_profile
-    or marker_profile
     or current_profile
     or (str(profiles[0].get("profile", "")).strip() if profiles and isinstance(profiles[0], dict) else "")
   )
@@ -117,14 +97,14 @@ def load_config(config_path: str | None = None, profile: str | None = None) -> d
     "system_id": flat.get("system_id", ""),
     "system_name": flat.get("system_name", ""),
     "ipmp_system_num": flat.get("ipmp_system_num", ""),
-    "openviking_url": os.getenv("OPENVIKING_URL", flat.get("openviking_url", "http://localhost:1933")),
-    "openviking_api_key": os.getenv("OPENVIKING_API_KEY", flat.get("openviking_api_key", "")),
-    "openviking_account_id": os.getenv("OPENVIKING_ACCOUNT_ID", flat.get("openviking_account_id", "")),
-    "openviking_user_id": os.getenv("OPENVIKING_USER_ID", flat.get("openviking_user_id", "")),
-    "openviking_timeout": float(os.getenv("OPENVIKING_TIMEOUT", flat.get("openviking_timeout", 30))),
-    "openai_base_url": os.getenv("OPENAI_BASE_URL", flat.get("openai_base_url", "")),
-    "openai_api_key": os.getenv("OPENAI_API_KEY", flat.get("openai_api_key", "")),
-    "openai_model": os.getenv("OPENAI_MODEL", flat.get("openai_model", "gpt-4o-mini")),
+    "openviking_url": flat.get("openviking_url", "http://localhost:1933"),
+    "openviking_api_key": flat.get("openviking_api_key", ""),
+    "openviking_account_id": flat.get("openviking_account_id", ""),
+    "openviking_user_id": flat.get("openviking_user_id", ""),
+    "openviking_timeout": float(flat.get("openviking_timeout", 30)),
+    "openai_base_url": flat.get("openai_base_url", ""),
+    "openai_api_key": flat.get("openai_api_key", ""),
+    "openai_model": flat.get("openai_model", "gpt-4o-mini"),
     "default_kb_name": flat.get("default_kb_name", ""),
   }
 

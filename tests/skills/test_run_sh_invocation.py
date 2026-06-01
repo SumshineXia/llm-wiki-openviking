@@ -9,6 +9,8 @@ SKILL_MAIN_MAP = {
   "wiki-health": "health.py",
   "wiki-lint": "lint.py",
   "wiki-graph": "graph.py",
+  "wiki-profile": "profile.py",
+  "wiki-save": "save.py",
 }
 
 

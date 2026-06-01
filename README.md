@@ -29,6 +29,8 @@
 - `skills/wiki-health` -> `~/.config/opencode/skills/wiki-health`
 - `skills/wiki-ingest` -> `~/.config/opencode/skills/wiki-ingest`
 - `skills/wiki-query` -> `~/.config/opencode/skills/wiki-query`
+- `skills/wiki-upload-source` -> `~/.config/opencode/skills/wiki-upload-source`
+- `skills/wiki-save` -> `~/.config/opencode/skills/wiki-save`
 - `skills/wiki-lint` -> `~/.config/opencode/skills/wiki-lint`
 - `skills/wiki-graph` -> `~/.config/opencode/skills/wiki-graph`
 - `skills/wiki-profile` -> `~/.config/opencode/skills/wiki-profile`
@@ -95,14 +97,14 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
 3. 上传或准备 raw source
 4. 执行 ingest
 5. 执行 query
-6. 按需保存 synthesis
+6. query 后确认是否保存，再执行 wiki-save
 7. 执行 lint 与 graph
 
 ---
 
 ## 每个 skill 的典型说法
 
-下面给出 7 个常用 skill 的自然语言示例说法（可直接改 `<kb>`、`<source>`、`<问题>` 后使用）：
+下面给出常用 skill 的自然语言示例说法（可直接改 `<kb>`、`<source>`、`<问题>` 后使用）：
 
 1. `wiki-bootstrap`
    - 「帮我为 `<kb>` 初始化远端知识库结构」
@@ -112,18 +114,29 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
    - 「把 `<kb>` 的 `raw/<source>.md` ingest 成 wiki 页面，并更新 index/overview/log」
 4. `wiki-query`
    - 「基于 `<kb>` 回答这个问题：`<问题>`」
-5. `wiki-query`（保存 synthesis）
+5. `wiki-save`
    - 「把刚才答案保存为 synthesis，slug 用 `<slug>`」
-6. `wiki-lint`
+6. `wiki-upload-source`
+   - 「把本地 `./notes.md` 上传到 `<kb>` 的 `raw/notes.md`」
+7. `wiki-lint`
    - 「对 `<kb>` 执行 wiki-lint，看看有没有孤儿页或重复标题」
-7. `wiki-graph`
+8. `wiki-graph`
    - 「为 `<kb>` 生成 wiki graph，输出 graph.json 和 graph.html」
+
+### query -> 确认 -> wiki-save（推荐）
+
+1. 先执行 `wiki-query` 获取答案。
+2. 成功返回后确认是否保存为 synthesis。
+3. 需要保存时执行 `wiki-save`（消费 query 输出的 payload，不重新检索）。
+
+说明：legacy `wiki-query --save` 会重新检索并再次调用 LLM，不是“保存刚才答案”的无损复用路径。
 
 ### 常见自然语言用法
 
 - 「先帮我为 `team-a/project-x` 做 wiki-bootstrap，再跑一次 wiki-health」
 - 「把 `team-a/project-x` 的 `raw/demo.md` ingest 成 wiki 页面，并更新 index/overview/log」
-- 「基于 `team-a/project-x` 回答：这个知识库当前的核心概念是什么？然后保存为 synthesis」
+- 「基于 `team-a/project-x` 回答：这个知识库当前的核心概念是什么？回答后我再决定是否保存」
+- 「把 `wiki-query` 刚才返回的 payload 保存为 synthesis，slug 用 `core-concepts`」
 - 「对 `team-a/project-x` 执行 wiki-lint，重点看孤儿页和重复标题」
 - 「为 `team-a/project-x` 构建 graph.json 和 graph.html，先 dry-run 再生成」
 
@@ -145,7 +158,7 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
 
 ### Q4：query 的回答怎么沉淀到知识库？
 
-在 query 后补一句「保存为 synthesis」，并提供 `slug`（若你的流程要求）。
+推荐流程是 `wiki-query` 后先确认，再调用 `wiki-save`。`wiki-query --save` 仅 legacy 兼容，会重新检索并再次调用 LLM。
 
 ### Q5：graph 文件在哪？
 
@@ -174,6 +187,7 @@ bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name team-a/proje
 bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name my-kb
 bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh --kb-name my-kb --source-uri raw/demo.md
 bash ~/.config/opencode/skills/wiki-query/scripts/run.sh --kb-name my-kb --question "解释这个知识库的核心主题"
+bash ~/.config/opencode/skills/wiki-save/scripts/run.sh --payload-file /tmp/wiki-query-save.json
 bash ~/.config/opencode/skills/wiki-lint/scripts/run.sh --kb-name my-kb
 bash ~/.config/opencode/skills/wiki-graph/scripts/run.sh --kb-name my-kb
 ```

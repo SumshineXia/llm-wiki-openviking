@@ -96,7 +96,7 @@ def test_load_config_uses_defaults_without_file_and_env(tmp_path: Path, monkeypa
   }
 
 
-def test_load_config_env_overrides_file_values(tmp_path: Path, monkeypatch) -> None:
+def test_load_config_ignores_env_and_uses_file_values(tmp_path: Path, monkeypatch) -> None:
   _clear_env(monkeypatch)
   config_path = tmp_path / "config.json"
   config_path.write_text(
@@ -136,14 +136,14 @@ def test_load_config_env_overrides_file_values(tmp_path: Path, monkeypatch) -> N
     "system_id": "flat-system",
     "system_name": "Flat System",
     "ipmp_system_num": "FLAT-IPMP",
-    "openviking_url": "http://env-host:1933",
-    "openviking_api_key": "env-key",
-    "openviking_account_id": "env-account",
-    "openviking_user_id": "env-user",
-    "openviking_timeout": 45.5,
-    "openai_base_url": "https://env-openai.local",
-    "openai_api_key": "env-openai-key",
-    "openai_model": "env-model",
+    "openviking_url": "http://file-host:1933",
+    "openviking_api_key": "file-key",
+    "openviking_account_id": "file-account",
+    "openviking_user_id": "file-user",
+    "openviking_timeout": 12.0,
+    "openai_base_url": "https://file-openai.local",
+    "openai_api_key": "file-openai-key",
+    "openai_model": "file-model",
     "default_kb_name": "file-kb",
   }
   assert isinstance(config["openviking_timeout"], float)
@@ -153,16 +153,16 @@ def test_load_config_casts_timeout_to_float_from_env(tmp_path: Path, monkeypatch
   _clear_env(monkeypatch)
   config_path = tmp_path / "config.json"
   config_path.write_text(json.dumps({"openviking_timeout": 22}), encoding="utf-8")
-  monkeypatch.setenv("OPENVIKING_TIMEOUT", "61")
-
   config = load_config(str(config_path))
 
-  assert config["openviking_timeout"] == 61.0
+  assert config["openviking_timeout"] == 22.0
   assert isinstance(config["openviking_timeout"], float)
 
 
 def test_load_config_uses_first_profile_by_default(tmp_path: Path, monkeypatch) -> None:
   _clear_env(monkeypatch)
+  monkeypatch.chdir(tmp_path)
+  monkeypatch.setattr(module, "DEFAULT_CURRENT_PROFILE_PATH", tmp_path / "current")
   config_path = tmp_path / "config.json"
   _write_v2_config(config_path)
 
@@ -185,16 +185,25 @@ def test_load_config_explicit_profile_has_high_priority(tmp_path: Path, monkeypa
   assert config["openviking_url"] == "http://p2-host:1933"
 
 
-def test_load_config_uses_llm_wiki_config_env(tmp_path: Path, monkeypatch) -> None:
+def test_load_config_ignores_openviking_env_overrides(tmp_path: Path, monkeypatch) -> None:
   _clear_env(monkeypatch)
-  config_path = tmp_path / "config-from-env.json"
-  _write_v2_config(config_path)
-  monkeypatch.setenv("LLM_WIKI_CONFIG", str(config_path))
+  config_path = tmp_path / "config.json"
+  config_path.write_text(
+    json.dumps(
+      {
+        "openviking_url": "http://file-host:1933",
+        "openviking_timeout": 12,
+      }
+    ),
+    encoding="utf-8",
+  )
+  monkeypatch.setenv("OPENVIKING_URL", "http://env-host:1933")
+  monkeypatch.setenv("OPENVIKING_TIMEOUT", "99")
 
-  config = load_config()
+  config = load_config(str(config_path))
 
-  assert config["profile"] == "p1"
-  assert config["openviking_api_key"] == "p1-key"
+  assert config["openviking_url"] == "http://file-host:1933"
+  assert config["openviking_timeout"] == 12.0
 
 
 def test_load_config_explicit_config_path_overrides_llm_wiki_config(
@@ -220,6 +229,24 @@ def test_load_config_explicit_config_path_overrides_llm_wiki_config(
 
   assert config["openviking_url"] == "http://explicit-host:1933"
   assert config["openviking_api_key"] == "explicit-key"
+
+
+def test_load_config_ignores_llm_wiki_config_env_without_explicit_config(
+  tmp_path: Path,
+  monkeypatch,
+) -> None:
+  _clear_env(monkeypatch)
+  monkeypatch.chdir(tmp_path)
+  monkeypatch.setattr(module, "DEFAULT_CONFIG_PATH", tmp_path / "default-config.json")
+
+  env_config_path = tmp_path / "env-config.json"
+  _write_v2_config(env_config_path)
+  monkeypatch.setenv("LLM_WIKI_CONFIG", str(env_config_path))
+
+  config = load_config()
+
+  assert config["profile"] == ""
+  assert config["openviking_url"] == "http://localhost:1933"
 
 
 def test_load_config_compat_with_flat_config(tmp_path: Path, monkeypatch) -> None:

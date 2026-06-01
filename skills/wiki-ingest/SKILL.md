@@ -31,7 +31,23 @@ bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
   --pretty
 ```
 
-可选参数：`--config <path>`、`--profile <name>`。
+可选参数：`--config <path>`、`--profile <name>`、`--max-context-chars <int>`、`--max-existing-page-names <int>`、`--long-doc-threshold <int>`、`--chunk-size <int>`、`--chunk-overlap <int>`、`--max-chunks <int>`、`--allow-partial-chunks`。
+
+- `--max-context-chars`：用于控制注入 LLM prompt 的 `index/overview` 节选长度上限，默认 `12000`。
+- `--max-existing-page-names`：用于控制注入 LLM prompt 的已存在 entity/concept 页文件名数量上限，默认 `100`。
+- `--long-doc-threshold`：source 字符数超过该阈值时启用长文档 chunk/reduce 流程，默认 `30000`。
+- `--chunk-size`：每个分块最大字符数，默认 `18000`。
+- `--chunk-overlap`：相邻分块重叠字符数，默认 `1000`，必须小于 `--chunk-size`。
+- `--max-chunks`：允许处理的最大分块数，默认 `20`；超过时默认直接失败，不做 source 截断。
+- `--allow-partial-chunks`：仅允许跳过失败的 chunk summary（至少成功 1 块）；不允许 source truncation。
+
+行为说明：
+
+- `index.md` / `overview.md` 仍会完整读取并用于确定性更新。
+- 传给 LLM 的上下文只使用节选（超长时保留头尾并标注截断）。
+- 已存在 entity/concept 名称优先从 `index.md` 对应 section 提取（兼容中文 section 与 legacy 英文 section）；提取不到时才做一层目录列表 fallback（`recursive=false`）。
+- 长文档模式先分块摘要，再基于 `schema/source_uri/source_slug/index_excerpt/overview_excerpt/existing page names/chunk summaries` 做 reduce，不会把完整 source 直接送入 reduce prompt。
+- `--allow-partial-chunks` 开启后只影响分块摘要阶段：失败块可跳过并记录失败数；若所有分块都失败则整体失败。
 
 仅预览（不写入）：
 

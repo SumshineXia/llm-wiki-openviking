@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -41,6 +42,11 @@ LEGACY_INDEX_SECTIONS = {
     "syntheses": ["## Syntheses"],
 }
 
+INDEX_SECTION_HEADINGS = {
+    *INDEX_SECTIONS.values(),
+    *[heading for headings in LEGACY_INDEX_SECTIONS.values() for heading in headings],
+}
+
 STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "if", "then", "than", "that", "this",
     "is", "are", "was", "were", "be", "been", "being",
@@ -58,6 +64,28 @@ ZH_STOPWORDS = {
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def format_json_text(data: dict[str, Any], *, pretty: bool) -> str:
+    return json.dumps(data, ensure_ascii=False, indent=2 if pretty else None) + "\n"
+
+
+def write_temp_json_file(data: dict[str, Any], *, pretty: bool) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    with tempfile.NamedTemporaryFile(
+        "w",
+        prefix=f"wiki-query-save-{stamp}-",
+        suffix=".json",
+        delete=False,
+        encoding="utf-8",
+    ) as fp:
+        fp.write(format_json_text(data, pretty=pretty))
+        return Path(fp.name)
+
+
+def write_json_file(path: Path, data: dict[str, Any], *, pretty: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_json_text(data, pretty=pretty), encoding="utf-8")
 
 
 def slugify(text: str) -> str:
@@ -442,6 +470,36 @@ def extract_index_links(index_text: str) -> Set[str]:
     return results
 
 
+def extract_index_entries(index_text: str) -> Set[str]:
+    results: Set[str] = set()
+    current_heading: str | None = None
+
+    wikilink_pattern = re.compile(r"\[\[([^\]]+)\]\]")
+    markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+
+    for line in index_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            current_heading = stripped
+            continue
+
+        if current_heading not in INDEX_SECTION_HEADINGS:
+            continue
+
+        for raw in wikilink_pattern.findall(line):
+            target = raw.split("|", 1)[0].strip()
+            normalized = normalize_relative_wiki_target(target)
+            if normalized:
+                results.add(normalized)
+
+        for raw in markdown_link_pattern.findall(line):
+            normalized = normalize_relative_wiki_target(raw)
+            if normalized:
+                results.add(normalized)
+
+    return results
+
+
 def tokenize(text: str) -> Set[str]:
     lowered_text = text.lower()
 
@@ -507,16 +565,51 @@ def select_relevant_pages(
     kb_root: str,
     question: str,
     top_k: int,
-) -> List[Dict[str, str]]:
+) -> tuple[List[Dict[str, str]], Dict[str, Any]]:
     question_terms = tokenize(question)
-    candidate_uris = build_candidate_pages(client, kb_root)
+
+    index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
+    index_entries = sorted(extract_index_entries(index_text))
+
+    page_char_limit = int(getattr(select_relevant_pages, "max_page_chars", 20000))
+    candidate_multiplier = int(getattr(select_relevant_pages, "candidate_multiplier", 3))
+    retrieval_mode = str(getattr(select_relevant_pages, "retrieval_mode", "auto"))
+
+    indexed_candidates: List[str] = []
+    for rel in index_entries:
+        uri = kb_root + "wiki/" + rel
+        canonical = resolve_canonical_markdown_uri(client, uri)
+        if canonical:
+            indexed_candidates.append(canonical)
+
+    seen_candidates: Set[str] = set()
+    deduped_indexed_candidates: List[str] = []
+    for uri in indexed_candidates:
+        if uri not in seen_candidates:
+            seen_candidates.add(uri)
+            deduped_indexed_candidates.append(uri)
+
+    candidate_count = max(top_k * candidate_multiplier, top_k)
+    scan_fallback_used = False
+
+    if retrieval_mode == "scan":
+        candidate_uris = list_markdown_pages(client, kb_root + "wiki/")[:candidate_count]
+    else:
+        candidate_uris = deduped_indexed_candidates[:candidate_count]
+        if retrieval_mode == "auto" and (not index_entries or len(candidate_uris) < min(top_k, 2)):
+            scan_fallback_used = True
+            candidate_uris = list_markdown_pages(client, kb_root + "wiki/")[:candidate_count]
 
     scored: List[Tuple[int, str, str]] = []
+    content_limit_hit_count = 0
     for uri in candidate_uris:
         try:
             text = client.read_text(uri)
         except Exception:
             continue
+        if len(text) > page_char_limit:
+            text = text[:page_char_limit]
+            content_limit_hit_count += 1
         score = score_page(question_terms, uri, text)
         scored.append((score, uri, text))
 
@@ -532,7 +625,16 @@ def select_relevant_pages(
             }
         )
 
-    return selected
+    debug = {
+        "retrieval_mode": retrieval_mode,
+        "index_entry_count": len(index_entries),
+        "candidate_count": len(candidate_uris),
+        "read_page_count": len(scored),
+        "content_limit_hit_count": content_limit_hit_count,
+        "fallback_scan_used": scan_fallback_used,
+        "max_page_chars": page_char_limit,
+    }
+    return selected, debug
 
 
 def build_llm_prompt(
@@ -541,6 +643,13 @@ def build_llm_prompt(
     overview_text: str,
     selected_pages: List[Dict[str, str]],
 ) -> str:
+    overview_limit = int(getattr(build_llm_prompt, "max_overview_chars", 12000))
+    overview_note = ""
+    clipped_overview = overview_text
+    if len(overview_text) > overview_limit:
+        clipped_overview = overview_text[:overview_limit]
+        overview_note = f"\n[overview truncated to {overview_limit} chars]"
+
     page_blocks = []
     for i, page in enumerate(selected_pages, start=1):
         page_blocks.append(
@@ -569,7 +678,7 @@ CONTENT:
 
 当前 wiki/overview.md：
 --- OVERVIEW START ---
-{overview_text}
+{clipped_overview}{overview_note}
 --- OVERVIEW END ---
 
 相关 wiki 页面：
@@ -690,6 +799,33 @@ def append_unique_bullet(index_text: str, section_key: str, bullet: str) -> str:
     return index_text[:insert_pos] + "\n" + bullet + index_text[insert_pos:]
 
 
+def upsert_index_link_bullet(index_text: str, section_key: str, link_path: str, title: str) -> str:
+    heading, _ = get_section_heading_by_key(index_text, section_key)
+    text = ensure_section(index_text, heading)
+    bullet = f"- [[{link_path}]] - {title}"
+    pattern = re.compile(rf"^-\s*\[\[{re.escape(link_path)}\]\]\s*-\s*.*$", re.MULTILINE)
+    if pattern.search(text):
+        return pattern.sub(bullet, text, count=1)
+    return append_unique_bullet(text, section_key, bullet)
+
+
+def build_overview_note(link_path: str, title: str) -> str:
+    return f"- [[{link_path}]] - {title}"
+
+
+def upsert_overview_synthesis_block(overview_text: str, link_path: str, note: str) -> str:
+    start_tag = f"<!-- synthesis:{link_path}:start -->"
+    end_tag = f"<!-- synthesis:{link_path}:end -->"
+    block = f"{start_tag}\n{note}\n{end_tag}"
+    pattern = re.compile(
+        rf"{re.escape(start_tag)}\\n.*?\\n{re.escape(end_tag)}",
+        re.DOTALL,
+    )
+    if pattern.search(overview_text):
+        return pattern.sub(block, overview_text, count=1)
+    return overview_text.rstrip() + "\n\n" + block + "\n"
+
+
 def append_log_entry(log_text: str, entry: str) -> str:
     entry = entry.strip()
     if not entry:
@@ -751,12 +887,47 @@ def render_synthesis_markdown(
 """
 
 
+def build_save_payload(
+    *,
+    kb_name: str,
+    kb_root: str,
+    question: str,
+    answer_markdown: str,
+    synthesis_title: str,
+    used_pages: list[str],
+    selected_pages: list[str],
+    created_at: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "source": "wiki-query",
+        "kb_name": kb_name,
+        "kb_root": kb_root,
+        "question": question,
+        "answer_markdown": answer_markdown,
+        "synthesis_title": synthesis_title,
+        "used_pages": used_pages,
+        "selected_pages": selected_pages,
+        "created_at": created_at,
+    }
+
+
 def parse_args() -> argparse.Namespace:
+    def positive_int(value: str) -> int:
+        parsed = int(value)
+        if parsed <= 0:
+            raise argparse.ArgumentTypeError("must be a positive integer")
+        return parsed
+
     parser = argparse.ArgumentParser(description="Query a remote OpenViking-backed wiki knowledge base.")
     parser.add_argument("--kb-name", required=True, help="Knowledge base name under viking://resources/")
     parser.add_argument("--question", required=True, help="Natural-language question")
-    parser.add_argument("--top-k", type=int, default=6, help="Number of candidate pages to pass to the LLM")
-    parser.add_argument("--save", action="store_true", help="Save answer to wiki/syntheses/")
+    parser.add_argument("--top-k", type=positive_int, default=6, help="Number of candidate pages to pass to the LLM")
+    parser.add_argument("--retrieval-mode", choices=["index", "scan", "auto"], default="auto", help="Page retrieval mode")
+    parser.add_argument("--candidate-multiplier", type=positive_int, default=3, help="Candidate page multiplier for second-stage rerank")
+    parser.add_argument("--max-page-chars", type=positive_int, default=20000, help="Max chars read per candidate page")
+    parser.add_argument("--max-overview-chars", type=positive_int, default=12000, help="Max chars used from overview prompt context")
+    parser.add_argument("--save", action="store_true", help="Legacy mode: re-query and save answer to wiki/syntheses/")
     parser.add_argument("--slug", default=None, help="Optional synthesis slug when --save is used")
     parser.add_argument("--model", default=None, help="Override model name")
     parser.add_argument("--openai-api-key", default=None, help="Override OpenAI API key")
@@ -768,6 +939,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", default=None, help="Path to config JSON")
     parser.add_argument("--profile", default=None, help="Profile name")
+    payload_group = parser.add_mutually_exclusive_group()
+    payload_group.add_argument("--save-payload-file", default=None, help="Write wiki-save payload JSON to this path")
+    payload_group.add_argument("--no-save-payload-file", action="store_true", help="Do not write automatic save payload file")
+    parser.add_argument("--output-file", default=None, help="Write full query result JSON to this path")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print result JSON")
     return parser.parse_args()
 
@@ -785,12 +960,30 @@ def main() -> int:
             index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
             log_text = read_if_exists(client, kb_root + "wiki/log.md", LOG_TITLE + "\n")
 
-            selected_pages = select_relevant_pages(
+            select_relevant_pages.retrieval_mode = args.retrieval_mode
+            select_relevant_pages.candidate_multiplier = args.candidate_multiplier
+            select_relevant_pages.max_page_chars = args.max_page_chars
+            build_llm_prompt.max_overview_chars = args.max_overview_chars
+
+            selection_result = select_relevant_pages(
                 client=client,
                 kb_root=kb_root,
                 question=args.question,
                 top_k=args.top_k,
             )
+            if isinstance(selection_result, tuple):
+                selected_pages, retrieval_debug = selection_result
+            else:
+                selected_pages = selection_result
+                retrieval_debug = {
+                    "retrieval_mode": args.retrieval_mode,
+                    "index_entry_count": 0,
+                    "candidate_count": len(selected_pages),
+                    "read_page_count": len(selected_pages),
+                    "content_limit_hit_count": 0,
+                    "fallback_scan_used": False,
+                    "max_page_chars": args.max_page_chars,
+                }
 
             prompt = build_llm_prompt(
                 schema_text=schema_text,
@@ -822,13 +1015,52 @@ def main() -> int:
 
             result: Dict[str, Any] = {
                 "status": "ok",
+                "kb_name": args.kb_name,
                 "kb_root": kb_root,
                 "question": args.question,
                 "selected_pages": [p["uri"] for p in selected_pages],
                 "used_pages": normalized_used_pages,
                 "answer_markdown": answer_markdown,
+                "synthesis_title": synthesis_title,
+                "recommended_save_skill": "wiki-save",
+                "save_payload": {},
+                "save_payload_path": None,
                 "saved": False,
+                "retrieval_mode": retrieval_debug["retrieval_mode"],
+                "index_entry_count": retrieval_debug["index_entry_count"],
+                "candidate_count": retrieval_debug["candidate_count"],
+                "read_page_count": retrieval_debug["read_page_count"],
+                "content_limit_hit_count": retrieval_debug["content_limit_hit_count"],
+                "fallback_scan_used": retrieval_debug["fallback_scan_used"],
+                "max_page_chars": retrieval_debug["max_page_chars"],
+                "max_overview_chars": args.max_overview_chars,
             }
+
+            created_at = now_iso()
+            selected_page_uris = [p["uri"] for p in selected_pages]
+            save_payload = build_save_payload(
+                kb_name=args.kb_name,
+                kb_root=kb_root,
+                question=args.question,
+                answer_markdown=answer_markdown,
+                synthesis_title=synthesis_title,
+                used_pages=normalized_used_pages,
+                selected_pages=selected_page_uris,
+                created_at=created_at,
+            )
+            result["save_payload"] = save_payload
+
+            if not args.no_save_payload_file:
+                if args.save_payload_file:
+                    explicit_payload_path = Path(args.save_payload_file).expanduser()
+                    write_json_file(explicit_payload_path, save_payload, pretty=True)
+                    result["save_payload_path"] = str(explicit_payload_path)
+                else:
+                    try:
+                        auto_payload_path = write_temp_json_file(save_payload, pretty=True)
+                        result["save_payload_path"] = str(auto_payload_path)
+                    except Exception as exc:
+                        result["save_payload_write_error"] = str(exc)
 
             if args.save:
                 synthesis_target = build_synthesis_target(args.slug, synthesis_title)
@@ -841,21 +1073,35 @@ def main() -> int:
                     used_pages=normalized_used_pages,
                 )
 
-                write_page(client, synthesis_uri, synthesis_markdown)
+                resolved_synthesis_uri, should_create = resolve_write_target_uri(client, synthesis_uri)
+                client.write_text(resolved_synthesis_uri, synthesis_markdown, create=should_create, wait=True)
 
-                bullet = f"- [[syntheses/{synthesis_slug}.md]] - {synthesis_title}"
-                new_index_text = append_unique_bullet(index_text, "syntheses", bullet)
+                link_path = f"syntheses/{synthesis_slug}.md"
+                overview_note = build_overview_note(link_path, synthesis_title)
+                new_index_text = upsert_index_link_bullet(index_text, "syntheses", link_path, synthesis_title)
+                new_overview_text = upsert_overview_synthesis_block(overview_text, link_path, overview_note)
                 new_log_text = append_log_entry(
                     log_text,
                     f"已保存综合结论 {synthesis_slug} 到 wiki/syntheses/{synthesis_slug}.md",
                 )
 
                 write_page(client, kb_root + "wiki/index.md", new_index_text)
+                if new_overview_text != overview_text:
+                    write_page(client, kb_root + "wiki/overview.md", new_overview_text)
                 write_page(client, kb_root + "wiki/log.md", new_log_text)
 
                 result["saved"] = True
-                result["synthesis_uri"] = synthesis_uri
+                result["synthesis_uri"] = resolved_synthesis_uri
                 result["synthesis_slug"] = synthesis_slug
+                result["save_deprecated"] = True
+                result["legacy_save_requeries"] = True
+                result["created"] = should_create
+                result["updated"] = not should_create
+                result["overview_updated"] = new_overview_text != overview_text
+
+            if args.output_file:
+                output_path = Path(args.output_file).expanduser()
+                write_json_file(output_path, result, pretty=args.pretty)
 
             if args.pretty:
                 print(json.dumps(result, ensure_ascii=False, indent=2))

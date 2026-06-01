@@ -5,10 +5,9 @@ import json
 import os
 import re
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -334,19 +333,197 @@ def list_markdown_pages(client: OVFSClient, root_uri: str) -> List[str]:
     return deduped
 
 
-def build_context_snapshot(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
+def list_markdown_pages_non_recursive(client: OVFSClient, root_uri: str) -> List[str]:
+    try:
+        items = client.ls(root_uri, recursive=False)
+    except Exception:
+        return []
+
+    uris: List[str] = []
+    for item in items:
+        if isinstance(item, str):
+            uri = item
+            is_dir = False
+        elif isinstance(item, dict):
+            uri = item.get("uri") or item.get("path")
+            is_dir = bool(item.get("isDir", False))
+        else:
+            continue
+
+        if not uri or not isinstance(uri, str):
+            continue
+        if not uri.startswith("viking://"):
+            continue
+        if is_dir:
+            continue
+        if uri.endswith(".md"):
+            uris.append(uri)
+
+    seen = set()
+    deduped = []
+    for uri in uris:
+        if uri not in seen:
+            seen.add(uri)
+            deduped.append(uri)
+    return deduped
+
+
+def truncate_for_prompt(text: str, max_chars: int) -> Tuple[str, bool]:
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+
+    if len(text) <= max_chars:
+        return text, False
+
+    marker = "\n... [truncated for prompt] ...\n"
+    budget = max_chars - len(marker)
+    if budget <= 2:
+        return text[:max_chars], True
+
+    head_len = budget // 2
+    tail_len = budget - head_len
+    return text[:head_len] + marker + text[-tail_len:], True
+
+
+def split_markdown_into_chunks(
+    text: str,
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+    max_chunks: int,
+) -> Dict[str, Any]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    if chunk_overlap < 0:
+        raise ValueError("chunk_overlap must be non-negative")
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be smaller than chunk_size")
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be positive")
+
+    original_char_count = len(text)
+    if not text:
+        return {
+            "chunks": [],
+            "truncated": False,
+            "original_char_count": 0,
+            "chunk_count": 0,
+            "used_chunk_count": 0,
+        }
+
+    chunks: List[str] = []
+    start = 0
+    while start < len(text):
+        tentative_end = min(start + chunk_size, len(text))
+        end = tentative_end
+
+        if tentative_end < len(text):
+            window = text[start:tentative_end]
+            heading_idx = window.rfind("\n#")
+            blank_idx = window.rfind("\n\n")
+            split_idx = -1
+            if heading_idx > 0:
+                split_idx = heading_idx + 1
+            elif blank_idx > 0:
+                split_idx = blank_idx + 2
+
+            if split_idx > 0:
+                end = start + split_idx
+
+        if end <= start:
+            end = tentative_end
+
+        chunk = text[start:end]
+        if chunk:
+            chunks.append(chunk)
+
+        if end >= len(text):
+            break
+        next_start = end - chunk_overlap
+        if next_start <= start:
+            next_start = end
+        start = next_start
+
+    chunk_count = len(chunks)
+    used_chunk_count = min(chunk_count, max_chunks)
+    truncated = chunk_count > max_chunks
+    return {
+        "chunks": chunks,
+        "truncated": truncated,
+        "original_char_count": original_char_count,
+        "chunk_count": chunk_count,
+        "used_chunk_count": used_chunk_count,
+    }
+
+
+def extract_page_names_from_index(index_text: str, section_key: str) -> List[str]:
+    section_headings = [INDEX_SECTIONS[section_key], *LEGACY_INDEX_SECTIONS.get(section_key, [])]
+    lines = index_text.splitlines()
+
+    in_section = False
+    names: List[str] = []
+    seen = set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_section = stripped in section_headings
+            continue
+
+        if not in_section:
+            continue
+
+        match = re.search(r"\[\[((?:entities|concepts)/[^\]]+\.md)\]\]", stripped)
+        if not match:
+            continue
+        rel_path = match.group(1)
+        page_name = PurePosixPath(rel_path).name
+        if page_name and page_name not in seen:
+            seen.add(page_name)
+            names.append(page_name)
+
+    return names
+
+
+def build_context_snapshot(
+    client: OVFSClient,
+    kb_root: str,
+    *,
+    max_context_chars: int,
+    max_existing_page_names: int,
+) -> Dict[str, Any]:
     index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
     overview_text = read_if_exists(client, kb_root + "wiki/overview.md", OVERVIEW_TITLE + "\n")
     log_text = read_if_exists(client, kb_root + "wiki/log.md", LOG_TITLE + "\n")
 
-    entity_pages = list_markdown_pages(client, kb_root + "wiki/entities/")
-    concept_pages = list_markdown_pages(client, kb_root + "wiki/concepts/")
+    entity_page_names = extract_page_names_from_index(index_text, "entities")
+    concept_page_names = extract_page_names_from_index(index_text, "concepts")
+
+    if not entity_page_names:
+        entity_page_names = [
+            PurePosixPath(uri).name
+            for uri in list_markdown_pages_non_recursive(client, kb_root + "wiki/entities/")
+        ]
+    if not concept_page_names:
+        concept_page_names = [
+            PurePosixPath(uri).name
+            for uri in list_markdown_pages_non_recursive(client, kb_root + "wiki/concepts/")
+        ]
+
+    entity_pages = [kb_root + "wiki/entities/" + name for name in entity_page_names[:max_existing_page_names]]
+    concept_pages = [kb_root + "wiki/concepts/" + name for name in concept_page_names[:max_existing_page_names]]
     source_pages = list_markdown_pages(client, kb_root + "wiki/sources/")
+
+    index_excerpt, index_truncated_for_prompt = truncate_for_prompt(index_text, max_context_chars)
+    overview_excerpt, overview_truncated_for_prompt = truncate_for_prompt(overview_text, max_context_chars)
 
     return {
         "index_text": index_text,
         "overview_text": overview_text,
         "log_text": log_text,
+        "index_excerpt": index_excerpt,
+        "overview_excerpt": overview_excerpt,
+        "index_truncated_for_prompt": index_truncated_for_prompt,
+        "overview_truncated_for_prompt": overview_truncated_for_prompt,
         "entity_pages": entity_pages,
         "concept_pages": concept_pages,
         "source_pages": source_pages,
@@ -360,8 +537,13 @@ def build_llm_prompt(
     context: Dict[str, Any],
     source_slug: str,
 ) -> str:
-    entity_page_names = [PurePosixPath(uri).name for uri in context["entity_pages"]][:100]
-    concept_page_names = [PurePosixPath(uri).name for uri in context["concept_pages"]][:100]
+    if "index_excerpt" not in context or "overview_excerpt" not in context:
+        raise ValueError("context must include index_excerpt and overview_excerpt for prompt building")
+
+    entity_page_names = [PurePosixPath(uri).name for uri in context["entity_pages"]]
+    concept_page_names = [PurePosixPath(uri).name for uri in context["concept_pages"]]
+    index_excerpt = str(context["index_excerpt"])
+    overview_excerpt = str(context["overview_excerpt"])
 
     return f"""
 你正在为基于远端 OpenViking 的 llm-wiki 知识库生成 wiki 内容。
@@ -378,14 +560,14 @@ def build_llm_prompt(
 建议使用的 source slug：
 {source_slug}
 
-当前 wiki/index.md：
+当前 wiki/index.md（用于提示的节选）：
 --- INDEX START ---
-{context["index_text"]}
+{index_excerpt}
 --- INDEX END ---
 
-当前 wiki/overview.md：
+当前 wiki/overview.md（用于提示的节选）：
 --- OVERVIEW START ---
-{context["overview_text"]}
+{overview_excerpt}
 --- OVERVIEW END ---
 
 已存在的实体页文件名：
@@ -494,6 +676,94 @@ def call_llm(
     return parsed
 
 
+def build_chunk_summary_prompt(
+    *,
+    source_uri: str,
+    source_slug: str,
+    chunk_index: int,
+    chunk_count: int,
+    chunk_text: str,
+) -> str:
+    return f"""
+你正在为 wiki ingest 的长文档流程生成分块摘要。
+
+当前 source URI：
+{source_uri}
+
+source slug：
+{source_slug}
+
+当前分块：第 {chunk_index}/{chunk_count} 块。
+
+请阅读分块原文并仅返回 JSON：
+
+{{
+  "summary": "string",
+  "key_entities": ["string"],
+  "key_concepts": ["string"],
+  "key_claims": ["string"],
+  "possible_wikilinks": ["string"]
+}}
+
+分块原文：
+--- CHUNK START ---
+{chunk_text}
+--- CHUNK END ---
+
+规则：
+- 所有自然语言使用简体中文。
+- 只输出合法 JSON，不要输出额外说明。
+""".strip()
+
+
+def summarize_chunk(
+    *,
+    source_uri: str,
+    source_slug: str,
+    chunk_index: int,
+    chunk_count: int,
+    chunk_text: str,
+    api_key: Optional[str],
+    base_url: Optional[str],
+    model: Optional[str],
+) -> Dict[str, Any]:
+    prompt = build_chunk_summary_prompt(
+        source_uri=source_uri,
+        source_slug=source_slug,
+        chunk_index=chunk_index,
+        chunk_count=chunk_count,
+        chunk_text=chunk_text,
+    )
+    result = call_llm(
+        prompt,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+    )
+
+    summary = str(result.get("summary", "")).strip()
+    if not summary:
+        raise RuntimeError("Chunk summary is empty")
+
+    def normalize_string_list(value: Any) -> List[str]:
+        if not isinstance(value, list):
+            return []
+        output: List[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                output.append(text)
+        return output
+
+    return {
+        "summary": summary,
+        "key_entities": normalize_string_list(result.get("key_entities", [])),
+        "key_concepts": normalize_string_list(result.get("key_concepts", [])),
+        "key_claims": normalize_string_list(result.get("key_claims", [])),
+        "possible_wikilinks": normalize_string_list(result.get("possible_wikilinks", [])),
+    }
+
+
 def sanitize_pages(items: Any, kind: str) -> List[Dict[str, str]]:
     if not isinstance(items, list):
         return []
@@ -518,6 +788,18 @@ def sanitize_pages(items: Any, kind: str) -> List[Dict[str, str]]:
             }
         )
     return cleaned
+
+
+def dedupe_pages_by_slug(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    seen: set[str] = set()
+    deduped: List[Dict[str, str]] = []
+    for item in items:
+        slug = item.get("slug", "")
+        if slug in seen:
+            continue
+        seen.add(slug)
+        deduped.append(item)
+    return deduped
 
 
 def ensure_section(index_text: str, heading: str) -> str:
@@ -625,25 +907,16 @@ def append_log_entry(log_text: str, entry: str) -> str:
 
 def write_page(client: OVFSClient, uri: str, markdown: str) -> None:
     target_uri, should_create = resolve_write_target_uri(client, uri)
-    if should_create:
-        file_name = PurePosixPath(target_uri).name or "untitled.md"
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_file_path = os.path.join(temp_dir, file_name)
-            with open(local_file_path, "w", encoding="utf-8") as fp:
-                fp.write(markdown)
-
-            client.add_local_resource(
-                file_path=local_file_path,
-                to=target_uri,
-                reason="wiki ingest create page",
-                wait=False,
-            )
-        return
-
-    client.write_text(target_uri, markdown, create=False, wait=True)
+    client.write_text(target_uri, markdown, create=should_create, wait=True)
 
 
 def parse_args() -> argparse.Namespace:
+    def positive_int(value: str) -> int:
+        parsed = int(value)
+        if parsed <= 0:
+            raise argparse.ArgumentTypeError("must be a positive integer")
+        return parsed
+
     parser = argparse.ArgumentParser(description="Ingest a remote raw source into an OpenViking-backed wiki.")
     parser.add_argument("--kb-name", required=True, help="Knowledge base name under viking://resources/")
     parser.add_argument("--source-uri", required=True, help="Full raw source URI, e.g. viking://resources/my-kb/raw/foo.md")
@@ -659,7 +932,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pretty", action="store_true", help="Pretty-print result JSON")
     parser.add_argument("--config", default=None, help="Path to config JSON")
     parser.add_argument("--profile", default=None, help="Profile name")
-    return parser.parse_args()
+    parser.add_argument(
+        "--max-context-chars",
+        type=positive_int,
+        default=12000,
+        help="Max characters for each prompt context excerpt",
+    )
+    parser.add_argument(
+        "--max-existing-page-names",
+        type=positive_int,
+        default=100,
+        help="Max existing entity/concept page names included in prompt",
+    )
+    parser.add_argument("--long-doc-threshold", type=positive_int, default=30000, help="Long doc mode threshold in characters")
+    parser.add_argument("--chunk-size", type=positive_int, default=18000, help="Chunk size in characters")
+    parser.add_argument("--chunk-overlap", type=positive_int, default=1000, help="Chunk overlap in characters")
+    parser.add_argument("--max-chunks", type=positive_int, default=20, help="Maximum chunks for long doc mode")
+    parser.add_argument(
+        "--allow-partial-chunks",
+        action="store_true",
+        help="Allow skipping failed chunk summaries (does not allow source truncation)",
+    )
+    args = parser.parse_args()
+    if args.chunk_overlap >= args.chunk_size:
+        parser.error("--chunk-overlap must be smaller than --chunk-size")
+    return args
 
 
 def main() -> int:
@@ -677,13 +974,82 @@ def main() -> int:
                 raise OVFSHTTPError(f"File not found: {args.source_uri}")
 
             source_text = client.read_text(canonical_source_uri)
-            context = build_context_snapshot(client, kb_root)
+            context = build_context_snapshot(
+                client,
+                kb_root,
+                max_context_chars=args.max_context_chars,
+                max_existing_page_names=args.max_existing_page_names,
+            )
 
             source_slug = slugify(basename_without_ext(args.source_uri))
+            long_doc_mode = len(source_text) > args.long_doc_threshold
+            chunk_count = 1
+            used_chunk_count = 1
+            chunks_truncated = False
+            summary_failures = 0
+            partial_chunks_used = False
+
+            if long_doc_mode:
+                chunking_result = split_markdown_into_chunks(
+                    source_text,
+                    chunk_size=args.chunk_size,
+                    chunk_overlap=args.chunk_overlap,
+                    max_chunks=args.max_chunks,
+                )
+                chunk_count = int(chunking_result["chunk_count"])
+                used_chunk_count = int(chunking_result["used_chunk_count"])
+                chunks_truncated = bool(chunking_result["truncated"])
+
+                if chunks_truncated:
+                    raise RuntimeError(
+                        f"Chunk count {chunk_count} exceeds max_chunks={args.max_chunks}; source truncation is not allowed"
+                    )
+
+                chunk_summaries: List[Dict[str, Any]] = []
+                for idx, chunk_text in enumerate(chunking_result["chunks"], start=1):
+                    try:
+                        summary = summarize_chunk(
+                            source_uri=args.source_uri,
+                            source_slug=source_slug,
+                            chunk_index=idx,
+                            chunk_count=chunk_count,
+                            chunk_text=chunk_text,
+                            api_key=openai_settings["api_key"],
+                            base_url=openai_settings["base_url"],
+                            model=openai_settings["model"],
+                        )
+                        chunk_summaries.append(
+                            {
+                                "chunk_index": idx,
+                                **summary,
+                            }
+                        )
+                    except Exception:
+                        if not args.allow_partial_chunks:
+                            raise
+                        summary_failures += 1
+
+                if args.allow_partial_chunks:
+                    partial_chunks_used = summary_failures > 0
+                    if len(chunk_summaries) < 1:
+                        raise RuntimeError("All chunk summaries failed in allow-partial-chunks mode")
+                else:
+                    partial_chunks_used = False
+
+                source_for_reduce = json.dumps(
+                    {
+                        "chunk_summaries": chunk_summaries,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            else:
+                source_for_reduce = source_text
+
             prompt = build_llm_prompt(
                 schema_text=schema_text,
                 source_uri=args.source_uri,
-                source_text=source_text,
+                source_text=source_for_reduce,
                 context=context,
                 source_slug=source_slug,
             )
@@ -701,6 +1067,8 @@ def main() -> int:
 
             entity_pages = sanitize_pages(llm_result.get("entity_pages", []), "entity")
             concept_pages = sanitize_pages(llm_result.get("concept_pages", []), "concept")
+            entity_pages = dedupe_pages_by_slug(entity_pages)
+            concept_pages = dedupe_pages_by_slug(concept_pages)
 
             if not source_page_markdown:
                 raise RuntimeError("LLM did not return source_page_markdown")
@@ -756,7 +1124,21 @@ def main() -> int:
                 "entity_count": len(entity_pages),
                 "concept_count": len(concept_pages),
                 "dry_run": args.dry_run,
+                "context_slimming": {
+                    "max_context_chars": args.max_context_chars,
+                    "max_existing_page_names": args.max_existing_page_names,
+                },
+                "index_truncated_for_prompt": context["index_truncated_for_prompt"],
+                "overview_truncated_for_prompt": context["overview_truncated_for_prompt"],
+                "existing_entity_page_count": len(context["entity_pages"]),
+                "existing_concept_page_count": len(context["concept_pages"]),
                 "write_plan": write_plan,
+                "long_doc_mode": long_doc_mode,
+                "chunk_count": chunk_count,
+                "used_chunk_count": used_chunk_count,
+                "chunks_truncated": chunks_truncated,
+                "summary_failures": summary_failures,
+                "partial_chunks_used": partial_chunks_used,
             }
 
             if args.pretty:

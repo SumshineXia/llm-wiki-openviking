@@ -419,8 +419,8 @@ class OVFSClient:
             return self.add_local_resource(
                 file_path=local_path,
                 to=upload_to,
-                wait=False,
-                timeout=None,
+                wait=wait,
+                timeout=timeout,
                 strict=True,
             )
 

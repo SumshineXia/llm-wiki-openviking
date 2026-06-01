@@ -9,7 +9,7 @@ else
   PY="python3"
 fi
 
-MAIN_PATH="$SKILL_DIR/scripts/profile.py"
+MAIN_PATH="$SKILL_DIR/scripts/save.py"
 if [ ! -f "$MAIN_PATH" ]; then
   printf 'Missing target script: %s\n' "$MAIN_PATH" >&2
   exit 1
