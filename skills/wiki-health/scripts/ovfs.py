@@ -38,7 +38,9 @@ class OVFSConfig:
         from common import load_config
 
         config = load_config(config_path=config_path, profile=profile)
-        url = str(config.get("openviking_url", "http://localhost:1933"))
+        url = str(config.get("openviking_url") or "").strip()
+        if not url:
+            raise OVFSError("OpenViking URL 未配置，请检查 config/profile")
         api_key = config.get("openviking_api_key") or None
         account_id = config.get("openviking_account_id") or None
         user_id = config.get("openviking_user_id") or None
