@@ -771,6 +771,7 @@ def build_llm_prompt(
     source_text: str,
     context: Dict[str, Any],
     source_slug: str,
+    source_markdown_uris: List[str] | None = None,
 ) -> str:
     if "index_excerpt" not in context or "overview_excerpt" not in context:
         raise ValueError("context must include index_excerpt and overview_excerpt for prompt building")
@@ -780,10 +781,23 @@ def build_llm_prompt(
     index_excerpt = str(context["index_excerpt"])
     overview_excerpt = str(context["overview_excerpt"])
 
+    bundle_section = ""
+    if source_markdown_uris:
+        uri_list = "\n".join(f"- {u}" for u in source_markdown_uris)
+        bundle_section = f"""
+本次 ingest 的 source root URI：
+{source_uri}
+
+本次 ingest 包含的正文 markdown URI：
+{uri_list}
+
+注意：.abstract.md 和 .overview.md 属于 metadata，不能作为正文来源。
+
+"""
+
     return f"""
 你正在为基于远端 OpenViking 的 llm-wiki 知识库生成 wiki 内容。
-
-请严格遵循以下 schema：
+{bundle_section}请严格遵循以下 schema：
 
 --- SCHEMA START ---
 {schema_text}
@@ -1205,11 +1219,8 @@ def main() -> int:
         openai_settings = resolve_openai_settings(args)
 
         with OVFSClient(config) as client:
-            canonical_source_uri = resolve_canonical_markdown_uri(client, args.source_uri)
-            if not canonical_source_uri:
-                raise OVFSHTTPError(f"File not found: {args.source_uri}")
-
-            source_text = client.read_text(canonical_source_uri)
+            source_bundle = resolve_ingest_source_bundle(client, args.source_uri)
+            source_text = read_source_bundle_text(client, source_bundle)
             context = build_context_snapshot(
                 client,
                 kb_root,
@@ -1217,7 +1228,7 @@ def main() -> int:
                 max_existing_page_names=args.max_existing_page_names,
             )
 
-            source_slug = slugify(basename_without_ext(args.source_uri))
+            source_slug = slugify(source_title_stem_from_uri(source_bundle.root_uri))
             long_doc_mode = len(source_text) > args.long_doc_threshold
             chunk_count = 1
             used_chunk_count = 1
@@ -1245,7 +1256,7 @@ def main() -> int:
                 for idx, chunk_text in enumerate(chunking_result["chunks"], start=1):
                     try:
                         summary = summarize_chunk(
-                            source_uri=args.source_uri,
+                            source_uri=source_bundle.root_uri,
                             source_slug=source_slug,
                             chunk_index=idx,
                             chunk_count=chunk_count,
@@ -1284,10 +1295,11 @@ def main() -> int:
 
             prompt = build_llm_prompt(
                 schema_text=schema_text,
-                source_uri=args.source_uri,
+                source_uri=source_bundle.root_uri,
                 source_text=source_for_reduce,
                 context=context,
                 source_slug=source_slug,
+                source_markdown_uris=source_bundle.markdown_uris,
             )
             llm_result = call_llm(
                 prompt,
@@ -1354,7 +1366,13 @@ def main() -> int:
             result = {
                 "status": "ok",
                 "kb_root": kb_root,
-                "source_uri": args.source_uri,
+                "input_source_uri": args.source_uri,
+                "source_uri": source_bundle.root_uri,
+                "source_root_uri": source_bundle.root_uri,
+                "source_kind": source_bundle.source_kind,
+                "source_markdown_count": len(source_bundle.markdown_uris),
+                "source_markdown_uris": source_bundle.markdown_uris,
+                "ignored_metadata_uris": source_bundle.ignored_metadata_uris,
                 "source_slug": source_slug,
                 "source_title": source_title,
                 "entity_count": len(entity_pages),
