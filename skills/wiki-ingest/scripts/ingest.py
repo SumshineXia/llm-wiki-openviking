@@ -237,7 +237,7 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
 
         name = PurePosixPath(child_uri).name
 
-        if is_ignored_source_markdown(child_uri):
+        if name == "abstract.md":
             continue
 
         if not name.endswith(extensions):
@@ -324,6 +324,193 @@ def expected_content_child_uri(uri: str) -> str:
     normalized = uri.rstrip("/")
     basename = PurePosixPath(normalized).name
     return f"{normalized}/{basename}"
+
+
+def stat_uri_with_variants(
+    client: OVFSClient,
+    uri: str,
+) -> tuple[str, Dict[str, Any]] | None:
+    raw = uri.strip()
+    if not raw:
+        return None
+
+    candidates = [raw]
+    if raw.endswith("/"):
+        candidates.append(raw.rstrip("/"))
+    else:
+        candidates.append(raw.rstrip("/") + "/")
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        stat = get_uri_stat(client, candidate)
+        if stat:
+            return candidate, stat
+
+    return None
+
+
+MAX_SOURCE_DISCOVERY_NODES = 1000
+
+
+def natural_sort_key(text: str) -> list[Any]:
+    return [
+        int(x) if x.isdigit() else x.lower()
+        for x in re.split(r"(\d+)", text)
+    ]
+
+
+def discover_markdown_sources_under_dir(
+    client: OVFSClient,
+    dir_uri: str,
+) -> tuple[List[str], List[str]]:
+    if not dir_uri.endswith("/"):
+        dir_uri = dir_uri.rstrip("/") + "/"
+
+    markdown_uris: List[str] = []
+    ignored_metadata_uris: List[str] = []
+    visited: set[str] = set()
+    queue: List[str] = [dir_uri]
+    nodes_scanned = 0
+
+    while queue:
+        current_dir = queue.pop(0)
+        if current_dir in visited:
+            continue
+        visited.add(current_dir)
+        nodes_scanned += 1
+
+        if nodes_scanned > MAX_SOURCE_DISCOVERY_NODES:
+            raise IngestSourceError(
+                f"source bundle 过大或存在循环，已停止扫描; scanned={nodes_scanned}"
+            )
+
+        try:
+            children = client.ls(current_dir, recursive=False)
+        except OVFSHTTPError as exc:
+            msg = str(exc).lower()
+            if "404" in msg or "not found" in msg:
+                continue
+            raise IngestSourceError(f"扫描目录失败: {current_dir}: {exc}") from exc
+        except Exception as exc:
+            raise IngestSourceError(f"扫描目录失败: {current_dir}: {exc}") from exc
+
+        for child in children:
+            child_uri, child_is_dir_hint = extract_child_uri_and_is_dir(child)
+            if not child_uri or not isinstance(child_uri, str):
+                continue
+
+            if child_is_dir_hint is None:
+                child_resolved = stat_uri_with_variants(client, child_uri)
+                if child_resolved:
+                    child_uri = child_resolved[0]
+                    child_is_dir_hint = is_dir_stat(child_resolved[1])
+
+            if child_is_dir_hint:
+                queue.append(child_uri if child_uri.endswith("/") else child_uri + "/")
+                continue
+
+            if not child_uri.lower().endswith(".md"):
+                continue
+
+            if is_ignored_source_markdown(child_uri):
+                ignored_metadata_uris.append(child_uri)
+                continue
+
+            markdown_uris.append(child_uri)
+
+    markdown_uris = sorted(set(markdown_uris), key=natural_sort_key)
+    ignored_metadata_uris = sorted(set(ignored_metadata_uris), key=natural_sort_key)
+    return markdown_uris, ignored_metadata_uris
+
+
+def resolve_ingest_source_bundle(
+    client: OVFSClient,
+    source_uri: str,
+) -> IngestSourceBundle:
+    resolved = stat_uri_with_variants(client, source_uri)
+    if not resolved:
+        raise IngestSourceError(f"Source not found: {source_uri}")
+
+    resolved_uri, stat = resolved
+
+    if is_dir_stat(stat):
+        markdown_uris, ignored_metadata_uris = discover_markdown_sources_under_dir(
+            client, resolved_uri,
+        )
+
+        if not markdown_uris:
+            if ignored_metadata_uris:
+                raise IngestSourceError(
+                    "未找到可 ingest 的正文 markdown。"
+                    "该目录下只有 metadata markdown，已跳过。"
+                )
+            raise IngestSourceError(
+                "未找到可 ingest 的 markdown。"
+                "可能是上传转换尚未完成，或 source-uri 指错。"
+            )
+
+        return IngestSourceBundle(
+            root_uri=resolved_uri,
+            markdown_uris=markdown_uris,
+            ignored_metadata_uris=ignored_metadata_uris,
+            source_kind=(
+                "directory_single_markdown"
+                if len(markdown_uris) == 1
+                else "directory_bundle"
+            ),
+        )
+
+    if resolved_uri.lower().endswith(".md"):
+        if is_ignored_source_markdown(resolved_uri):
+            raise IngestSourceError(
+                f"该 markdown 是 metadata 文件，不能 ingest: {resolved_uri}"
+            )
+        return IngestSourceBundle(
+            root_uri=resolved_uri,
+            markdown_uris=[resolved_uri],
+            ignored_metadata_uris=[],
+            source_kind="single_markdown_file",
+        )
+
+    raise IngestSourceError(
+        f"该 source 不是可 ingest 的 markdown 文件，也不是包含 markdown 的目录: {resolved_uri}"
+    )
+
+
+def read_source_bundle_text(
+    client: OVFSClient,
+    bundle: IngestSourceBundle,
+) -> str:
+    parts: List[str] = []
+    total = len(bundle.markdown_uris)
+    for idx, uri in enumerate(bundle.markdown_uris, start=1):
+        content = client.read_text(uri)
+        parts.append(f"--- SOURCE FILE {idx}/{total} ---")
+        parts.append(f"URI: {uri}")
+        parts.append("")
+        parts.append(content)
+        parts.append("")
+    return "\n".join(parts)
+
+
+def source_name_from_uri(uri: str) -> str:
+    return PurePosixPath(uri.rstrip("/")).name
+
+
+def source_title_stem_from_uri(uri: str) -> str:
+    name = source_name_from_uri(uri)
+    suffixes = [
+        ".docx", ".doc", ".pdf", ".md", ".txt",
+        ".json", ".yaml", ".yml", ".sh", ".py",
+    ]
+    lower = name.lower()
+    for suffix in suffixes:
+        if lower.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def resolve_write_target_uri(client: OVFSClient, uri: str) -> tuple[str, bool]:

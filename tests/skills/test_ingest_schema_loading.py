@@ -15,6 +15,7 @@ def load_ingest_module():
   assert spec is not None and spec.loader is not None
   sys.path.insert(0, str(ingest_path.parent))
   module = importlib.util.module_from_spec(spec)
+  sys.modules[spec.name] = module
   spec.loader.exec_module(module)
   return module
 

@@ -12,6 +12,7 @@ ingestSpec = spec_from_file_location("wiki_ingest_script", ingestModulePath)
 if ingestSpec is None or ingestSpec.loader is None:
   raise RuntimeError("无法加载 skills/wiki-ingest/scripts/ingest.py")
 ingestModule = module_from_spec(ingestSpec)
+sys.modules[ingestSpec.name] = ingestModule
 ingestSpec.loader.exec_module(ingestModule)
 
 queryScriptsDir = repoRoot / "skills" / "wiki-query" / "scripts"
