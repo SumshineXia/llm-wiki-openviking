@@ -59,6 +59,15 @@ bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
   --pretty
 ```
 
+## Source Bundle 说明
+
+当用户要求 ingest raw 中某个上传资源时，不要假设 raw/<name> 是单个文件。
+OpenViking 可能把任意上传文件转换成 raw/<name>/ 目录 bundle。
+该 bundle 下可能包含 .abstract.md、.overview.md、正文 md 和多层子目录。
+wiki-ingest 会递归查找正文 md，并跳过 metadata md。
+
+如果用户只给自然语言描述，没有给 source-uri，先浏览 raw/ 目录定位最匹配的 raw source bundle URI，再把该 URI 传给 --source-uri。
+
 ## 强约束
 
 - 不要调用项目根目录 `scripts/` 下的命令

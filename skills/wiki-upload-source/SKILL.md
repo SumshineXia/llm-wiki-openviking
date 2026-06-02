@@ -34,6 +34,12 @@ bash ~/.config/opencode/skills/wiki-upload-source/scripts/run.sh \
 
 可选参数：`--config <path>`、`--profile <name>`。
 
+## 上传后说明
+
+上传成功后，返回结果中包含 suggested_ingest_uri 和 next_step。
+OpenViking 可能会将上传的资源转换为同名目录 bundle。
+使用 suggested_ingest_uri 调用 wiki-ingest 即可，wiki-ingest 会自动处理。
+
 ## 强约束
 
 - `--to` 必须以 `raw/` 开头
