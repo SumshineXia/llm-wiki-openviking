@@ -185,6 +185,41 @@ def get_uri_stat(client: OVFSClient, uri: str) -> Dict[str, Any] | None:
         raise
 
 
+def is_ignored_source_markdown(uri: str) -> bool:
+    name = PurePosixPath(uri.rstrip("/")).name
+    return name in IGNORED_SOURCE_MARKDOWN_NAMES
+
+
+def is_dir_stat(stat: dict[str, Any]) -> bool:
+    if isinstance(stat.get("isDir"), bool):
+        return stat["isDir"]
+    if isinstance(stat.get("is_dir"), bool):
+        return stat["is_dir"]
+    if str(stat.get("type", "")).lower() in {"dir", "directory", "folder"}:
+        return True
+    return False
+
+
+def extract_child_uri_and_is_dir(child: Any) -> tuple[str | None, bool | None]:
+    if isinstance(child, str):
+        return child, None
+
+    if isinstance(child, dict):
+        child_uri = child.get("uri") or child.get("path")
+        child_is_dir: bool | None = None
+
+        if isinstance(child.get("isDir"), bool):
+            child_is_dir = child["isDir"]
+        elif isinstance(child.get("is_dir"), bool):
+            child_is_dir = child["is_dir"]
+        elif str(child.get("type", "")).lower() in {"dir", "directory", "folder"}:
+            child_is_dir = True
+
+        return child_uri, child_is_dir
+
+    return None, None
+
+
 def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> str | None:
     if not uri.endswith("/"):
         uri = uri.rstrip("/") + "/"
