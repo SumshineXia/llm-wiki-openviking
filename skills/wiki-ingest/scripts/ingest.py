@@ -12,7 +12,29 @@ from typing import Any, Dict, List, Optional, Tuple
 from openai import OpenAI
 
 from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
+from dataclasses import dataclass
+
 from common import build_error_result, build_kb_root, load_config, print_json
+
+
+class IngestSourceError(RuntimeError):
+    pass
+
+
+IGNORED_SOURCE_MARKDOWN_NAMES = {
+    ".abstract.md",
+    ".overview.md",
+    "abstract.md",
+    "overview.md",
+}
+
+
+@dataclass
+class IngestSourceBundle:
+    root_uri: str
+    markdown_uris: list[str]
+    ignored_metadata_uris: list[str]
+    source_kind: str
 
 
 DEFAULT_LLM_CONFIG_PATH = (
