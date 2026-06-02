@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from common import build_kb_root, print_json, validate_kb_name
+from common import build_error_result, build_kb_root, print_json, validate_kb_name
 from ovfs import OVFSClient, OVFSConfig, ensure_dir, ensure_text_file
 
 
@@ -67,24 +67,29 @@ def parse_args() -> argparse.Namespace:
   return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
   args = parse_args()
-  plan = plan_bootstrap_paths(args.kb_name)
-  config = OVFSConfig.load(config_path=args.config, profile=args.profile)
-  result: dict[str, Any] = {
-    "kb_name": validate_kb_name(args.kb_name),
-    "dry_run": bool(args.dry_run),
-    "plan": plan,
-  }
+  try:
+    plan = plan_bootstrap_paths(args.kb_name)
+    config = OVFSConfig.load(config_path=args.config, profile=args.profile)
+    result: dict[str, Any] = {
+      "kb_name": validate_kb_name(args.kb_name),
+      "dry_run": bool(args.dry_run),
+      "plan": plan,
+    }
 
-  if args.dry_run:
+    if args.dry_run:
+      print_json(result, args.pretty)
+      return 0
+
+    apply_bootstrap(plan, config)
+    result["status"] = "ok"
     print_json(result, args.pretty)
-    return
-
-  apply_bootstrap(plan, config)
-  result["status"] = "ok"
-  print_json(result, args.pretty)
+    return 0
+  except Exception as exc:
+    print_json(build_error_result(exc), pretty=args.pretty)
+    return 1
 
 
 if __name__ == "__main__":
-  main()
+  raise SystemExit(main())

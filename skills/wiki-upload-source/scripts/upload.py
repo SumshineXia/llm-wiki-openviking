@@ -5,7 +5,7 @@ import posixpath
 from pathlib import Path
 from typing import Any
 
-from common import build_kb_root, normalize_viking_uri, print_json, validate_kb_name
+from common import build_error_result, build_kb_root, normalize_viking_uri, print_json, validate_kb_name
 from ovfs import OVFSClient, OVFSConfig
 
 
@@ -70,18 +70,23 @@ def runUpload(
   }
 
 
-def main() -> None:
+def main() -> int:
   args = parse_args()
-  result = runUpload(
-    args.kb_name,
-    args.file,
-    args.to,
-    waitForCompletion=args.wait,
-    configPath=args.config,
-    profile=args.profile,
-  )
-  print_json(result, pretty=args.pretty)
+  try:
+    result = runUpload(
+      args.kb_name,
+      args.file,
+      args.to,
+      waitForCompletion=args.wait,
+      configPath=args.config,
+      profile=args.profile,
+    )
+    print_json(result, pretty=args.pretty)
+    return 0
+  except Exception as exc:
+    print_json(build_error_result(exc), pretty=args.pretty)
+    return 1
 
 
 if __name__ == "__main__":
-  main()
+  raise SystemExit(main())

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from openai import OpenAI
 
 from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
-from common import build_kb_root, load_config
+from common import build_error_result, build_kb_root, load_config, print_json
 
 
 DEFAULT_LLM_CONFIG_PATH = (
@@ -949,12 +949,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    kb_root = build_kb_root(args.kb_name)
-    schema_text = read_local_schema()
-    config = OVFSConfig.load(config_path=args.config, profile=args.profile)
-    openai_settings = resolve_openai_settings(args)
+    kb_root = ""
 
     try:
+        kb_root = build_kb_root(args.kb_name)
+        schema_text = read_local_schema()
+        config = OVFSConfig.load(config_path=args.config, profile=args.profile)
+        openai_settings = resolve_openai_settings(args)
+
         with OVFSClient(config) as client:
             overview_text = read_if_exists(client, kb_root + "wiki/overview.md", OVERVIEW_TITLE + "\n")
             index_text = read_if_exists(client, kb_root + "wiki/index.md", INDEX_TITLE + "\n")
@@ -1103,21 +1105,11 @@ def main() -> int:
                 output_path = Path(args.output_file).expanduser()
                 write_json_file(output_path, result, pretty=args.pretty)
 
-            if args.pretty:
-                print(json.dumps(result, ensure_ascii=False, indent=2))
-            else:
-                print(json.dumps(result, ensure_ascii=False))
-
+            print_json(result, pretty=args.pretty)
             return 0
 
     except Exception as exc:
-        error_result = {
-            "status": "error",
-            "kb_root": kb_root,
-            "question": args.question,
-            "error": str(exc),
-        }
-        print(json.dumps(error_result, ensure_ascii=False, indent=2))
+        print_json(build_error_result(exc, kb_root=kb_root), pretty=args.pretty)
         return 1
 
 

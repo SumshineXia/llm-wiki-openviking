@@ -8,13 +8,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
-  from common import build_kb_root
+  from common import build_error_result, build_kb_root, print_json
   from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
 except ModuleNotFoundError:
   scriptDir = Path(__file__).resolve().parent
   if str(scriptDir) not in sys.path:
     sys.path.insert(0, str(scriptDir))
-  from common import build_kb_root
+  from common import build_error_result, build_kb_root, print_json
   from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
 
 
@@ -520,38 +520,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
   args = parse_args()
-  kbRoot = build_kb_root(args.kb_name)
-  config = OVFSConfig.load(config_path=args.config, profile=args.profile)
+  kbRoot = ""
 
   try:
+    kbRoot = build_kb_root(args.kb_name)
+    config = OVFSConfig.load(config_path=args.config, profile=args.profile)
+
     with OVFSClient(config) as client:
       report = build_report(client, kbRoot)
-  except OVFSError as exc:
-    errorReport = {
-      "status": "error",
-      "kb_root": kbRoot,
-      "errors": [f"OVFS 错误：{str(exc)}"],
-      "warnings": [],
-      "details": {},
-    }
-    print(json.dumps(errorReport, ensure_ascii=False, indent=2))
-    return 2
   except Exception as exc:
-    errorReport = {
-      "status": "error",
-      "kb_root": kbRoot,
-      "errors": [f"未预期错误：{str(exc)}"],
-      "warnings": [],
-      "details": {},
-    }
-    print(json.dumps(errorReport, ensure_ascii=False, indent=2))
-    return 3
+    print_json(build_error_result(exc, kb_root=kbRoot), pretty=args.pretty)
+    return 1
 
-  if args.pretty:
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-  else:
-    print(json.dumps(report, ensure_ascii=False))
-
+  print_json(report, pretty=args.pretty)
   return 0 if report["status"] == "ok" else 1
 
 

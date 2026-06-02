@@ -7,6 +7,7 @@ import sys
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional, Set
 
+from common import build_error_result, print_json
 from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
 
 
@@ -589,38 +590,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    kb_root = build_kb_root(args.kb_name)
-    config = OVFSConfig.load(config_path=args.config, profile=args.profile)
+    kb_root = ""
 
     try:
+        kb_root = build_kb_root(args.kb_name)
+        config = OVFSConfig.load(config_path=args.config, profile=args.profile)
+
         with OVFSClient(config) as client:
             report = build_report(client, kb_root)
-    except OVFSError as exc:
-        error_report = {
-            "status": "error",
-            "kb_root": kb_root,
-            "errors": [f"OVFS 错误：{str(exc)}"],
-            "warnings": [],
-            "details": {},
-        }
-        print(json.dumps(error_report, ensure_ascii=False, indent=2))
-        return 2
     except Exception as exc:
-        error_report = {
-            "status": "error",
-            "kb_root": kb_root,
-            "errors": [f"未预期错误：{str(exc)}"],
-            "warnings": [],
-            "details": {},
-        }
-        print(json.dumps(error_report, ensure_ascii=False, indent=2))
-        return 3
+        print_json(build_error_result(exc, kb_root=kb_root), pretty=args.pretty)
+        return 1
 
-    if args.pretty:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-    else:
-        print(json.dumps(report, ensure_ascii=False))
-
+    print_json(report, pretty=args.pretty)
     return 0 if report["status"] == "ok" else 1
 
 

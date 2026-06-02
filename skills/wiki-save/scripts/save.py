@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
-from common import build_kb_root, print_json
+from common import build_error_result, build_kb_root, print_json
 from ovfs import OVFSClient, OVFSConfig, OVFSHTTPError
 
 
@@ -396,7 +396,7 @@ def main() -> int:
       print_json(result, pretty=args.pretty)
       return 0
   except Exception as exc:
-    print_json({"status": "error", "error": str(exc)}, pretty=True)
+    print_json(build_error_result(exc), pretty=args.pretty)
     return 1
 
 
