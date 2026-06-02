@@ -65,6 +65,8 @@ def runUpload(
     "kb_root": kbRoot,
     "source_file": str(sourcePath),
     "target_uri": targetUri,
+    "suggested_ingest_uri": targetUri,
+    "next_step": "可使用 suggested_ingest_uri 调用 wiki-ingest。OpenViking 可能会将该资源转换为同名目录 bundle，wiki-ingest 会自动递归查找正文 markdown。",
     "wait": waitForCompletion,
     "uploaded": True,
   }
