@@ -32,8 +32,8 @@ IGNORED_SOURCE_MARKDOWN_NAMES = {
 @dataclass
 class IngestSourceBundle:
     root_uri: str
-    markdown_uris: list[str]
-    ignored_metadata_uris: list[str]
+    markdown_uris: List[str]
+    ignored_metadata_uris: List[str]
     source_kind: str
 
 
@@ -231,32 +231,23 @@ def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[st
     candidates: list[str] = []
 
     for child in children:
-        child_uri: str | None = None
-        child_is_dir: bool | None = None
-
-        if isinstance(child, str):
-            child_uri = child
-        elif isinstance(child, dict):
-            child_uri = child.get("uri") or child.get("path")
-            if isinstance(child.get("isDir"), bool):
-                child_is_dir = child["isDir"]
-
+        child_uri, child_is_dir_hint = extract_child_uri_and_is_dir(child)
         if not child_uri or not isinstance(child_uri, str):
             continue
 
         name = PurePosixPath(child_uri).name
 
-        if name == "abstract.md":
+        if is_ignored_source_markdown(child_uri):
             continue
 
         if not name.endswith(extensions):
             continue
 
-        if child_is_dir is None:
+        if child_is_dir_hint is None:
             child_stat = get_uri_stat(client, child_uri)
-            child_is_dir = bool(child_stat and child_stat.get("isDir", False))
+            child_is_dir_hint = bool(child_stat and is_dir_stat(child_stat))
 
-        if child_is_dir:
+        if child_is_dir_hint:
             continue
 
         candidates.append(child_uri)
