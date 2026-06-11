@@ -475,6 +475,8 @@ class OVFSClient:
                 )
             except OVFSHTTPError as exc:
                 errors.append(f"create failed: {exc}")
+            except requests.exceptions.ConnectionError as exc:
+                errors.append(f"create failed: {exc}")
 
             try:
                 return self._content_write_mode(
@@ -485,6 +487,8 @@ class OVFSClient:
                     timeout=timeout,
                 )
             except OVFSHTTPError as exc:
+                errors.append(f"replace-after-create failed: {exc}")
+            except requests.exceptions.ConnectionError as exc:
                 errors.append(f"replace-after-create failed: {exc}")
 
             try:
@@ -497,6 +501,8 @@ class OVFSClient:
             except OVFSHTTPError as exc:
                 errors.append(f"resource-create failed: {exc}")
             except OVFSError as exc:
+                errors.append(f"resource-create failed: {exc}")
+            except requests.exceptions.ConnectionError as exc:
                 errors.append(f"resource-create failed: {exc}")
 
             try:
@@ -515,6 +521,8 @@ class OVFSClient:
                 timeout=timeout,
             )
         except OVFSHTTPError as exc:
+            errors.append(f"replace failed: {exc}")
+        except requests.exceptions.ConnectionError as exc:
             errors.append(f"replace failed: {exc}")
 
         try:

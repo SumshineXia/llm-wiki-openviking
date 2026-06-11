@@ -1154,9 +1154,20 @@ def append_log_entry(log_text: str, entry: str) -> str:
     return log_text.rstrip() + "\n" + line + "\n"
 
 
-def write_page(client: OVFSClient, uri: str, markdown: str) -> None:
+def write_page(
+    client: OVFSClient,
+    uri: str,
+    markdown: str,
+    *,
+    wait_for_indexing: bool = False,
+) -> None:
     target_uri, should_create = resolve_write_target_uri(client, uri)
-    client.write_text(target_uri, markdown, create=should_create, wait=True)
+    client.write_text(
+        target_uri,
+        markdown,
+        create=should_create,
+        wait=wait_for_indexing,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -1178,6 +1189,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to LLM config JSON (default: project config/llm-wiki-config.json)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not write changes back to OpenViking")
+    parser.add_argument(
+        "--wait-for-indexing",
+        action="store_true",
+        help="Wait for OpenViking semantic indexing after each written page. Default is async writes for faster ingest.",
+    )
     parser.add_argument("--pretty", action="store_true", help="Pretty-print result JSON")
     parser.add_argument("--config", default=None, help="Path to config JSON")
     parser.add_argument("--profile", default=None, help="Profile name")
@@ -1339,6 +1355,8 @@ def main() -> int:
                 log_note or f"已将资料 {source_slug} 整理为 wiki/sources/{source_slug}.md",
             )
 
+            write_wait_for_indexing = bool(args.wait_for_indexing)
+
             write_plan = {
                 "source_page": source_page_uri,
                 "entity_pages": [kb_root + f"wiki/entities/{p['slug']}.md" for p in entity_pages],
@@ -1349,19 +1367,49 @@ def main() -> int:
             }
 
             if not args.dry_run:
-                write_page(client, source_page_uri, source_page_markdown)
+                write_page(
+                    client,
+                    source_page_uri,
+                    source_page_markdown,
+                    wait_for_indexing=write_wait_for_indexing,
+                )
 
                 for page in entity_pages:
                     uri = kb_root + f"wiki/entities/{page['slug']}.md"
-                    write_page(client, uri, page["markdown"])
+                    write_page(
+                        client,
+                        uri,
+                        page["markdown"],
+                        wait_for_indexing=write_wait_for_indexing,
+                    )
 
                 for page in concept_pages:
                     uri = kb_root + f"wiki/concepts/{page['slug']}.md"
-                    write_page(client, uri, page["markdown"])
+                    write_page(
+                        client,
+                        uri,
+                        page["markdown"],
+                        wait_for_indexing=write_wait_for_indexing,
+                    )
 
-                write_page(client, index_uri, new_index_text)
-                write_page(client, overview_uri, new_overview_text)
-                write_page(client, log_uri, new_log_text)
+                write_page(
+                    client,
+                    index_uri,
+                    new_index_text,
+                    wait_for_indexing=write_wait_for_indexing,
+                )
+                write_page(
+                    client,
+                    overview_uri,
+                    new_overview_text,
+                    wait_for_indexing=write_wait_for_indexing,
+                )
+                write_page(
+                    client,
+                    log_uri,
+                    new_log_text,
+                    wait_for_indexing=write_wait_for_indexing,
+                )
 
             result = {
                 "status": "ok",
@@ -1378,6 +1426,8 @@ def main() -> int:
                 "entity_count": len(entity_pages),
                 "concept_count": len(concept_pages),
                 "dry_run": args.dry_run,
+                "write_wait_for_indexing": write_wait_for_indexing,
+                "semantic_indexing_mode": "sync" if write_wait_for_indexing else "async",
                 "context_slimming": {
                     "max_context_chars": args.max_context_chars,
                     "max_existing_page_names": args.max_existing_page_names,

@@ -164,6 +164,7 @@ def test_parse_args_supports_context_slimming_defaults(monkeypatch) -> None:
 
   assert args.max_context_chars == 12000
   assert args.max_existing_page_names == 100
+  assert args.wait_for_indexing is False
 
 
 @pytest.mark.parametrize("arg", ["--max-context-chars", "--max-existing-page-names"])
@@ -183,3 +184,21 @@ def test_parse_args_rejects_non_positive_values(monkeypatch, arg: str) -> None:
   )
   with pytest.raises(SystemExit):
     module.parse_args()
+
+
+def test_parse_args_supports_wait_for_indexing(monkeypatch) -> None:
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "ingest.py",
+      "--kb-name",
+      "demo",
+      "--source-uri",
+      "viking://resources/demo/raw/a.md",
+      "--wait-for-indexing",
+    ],
+  )
+  args = module.parse_args()
+
+  assert args.wait_for_indexing is True

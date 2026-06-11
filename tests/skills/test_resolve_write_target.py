@@ -455,3 +455,66 @@ def test_write_page_updates_plain_file_directly() -> None:
   assert write_text_calls[0]["uri"] == same_name_uri
   assert write_text_calls[0]["content"] == "# 直接更新\n\n内容"
   assert len(add_resource_calls) == 0, "不应调用 add_local_resource"
+
+
+# ===== write_page wait 行为测试 =====
+
+def test_write_page_defaults_to_async_write_wait_false() -> None:
+  target_uri = "viking://resources/my-kb/wiki/concepts/new-thing.md"
+  write_text_calls = []
+
+  client = DummyOVFS()
+
+  def fake_write_text(uri, content, create=False, append=False, wait=False, timeout=None):
+    write_text_calls.append(
+      {
+        "uri": uri,
+        "content": content,
+        "create": create,
+        "wait": wait,
+      }
+    )
+    return {}
+
+  client.write_text = fake_write_text
+
+  with patch.object(module, "get_uri_stat", return_value=None):
+    write_page(client, target_uri, "# 新概念\n\n内容")
+
+  assert len(write_text_calls) == 1
+  assert write_text_calls[0]["uri"] == target_uri
+  assert write_text_calls[0]["create"] is True
+  assert write_text_calls[0]["wait"] is False
+
+
+def test_write_page_can_wait_for_indexing() -> None:
+  target_uri = "viking://resources/my-kb/wiki/concepts/new-thing.md"
+  write_text_calls = []
+
+  client = DummyOVFS()
+
+  def fake_write_text(uri, content, create=False, append=False, wait=False, timeout=None):
+    write_text_calls.append(
+      {
+        "uri": uri,
+        "content": content,
+        "create": create,
+        "wait": wait,
+      }
+    )
+    return {}
+
+  client.write_text = fake_write_text
+
+  with patch.object(module, "get_uri_stat", return_value=None):
+    write_page(
+      client,
+      target_uri,
+      "# 新概念\n\n内容",
+      wait_for_indexing=True,
+    )
+
+  assert len(write_text_calls) == 1
+  assert write_text_calls[0]["uri"] == target_uri
+  assert write_text_calls[0]["create"] is True
+  assert write_text_calls[0]["wait"] is True

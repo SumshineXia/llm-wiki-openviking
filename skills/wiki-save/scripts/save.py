@@ -8,13 +8,28 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
+import time as _time
+
 from common import build_error_result, build_kb_root, print_json
 from ovfs import OVFSClient, OVFSConfig, OVFSHTTPError
+
+_phaseTimes: list[dict[str, Any]] = []
+
+
+def _stamp(label: str) -> None:
+  _phaseTimes.append({"label": label, "ts": _time.monotonic()})
 
 
 INDEX_TITLE = "# 索引"
 OVERVIEW_TITLE = "# 概览"
 LOG_TITLE = "# 操作日志\n"
+
+
+def resolveWriteUri(client: OVFSClient, uri: str) -> str:
+  canonical = resolveCanonicalMarkdownUri(client, uri)
+  if canonical:
+    return canonical
+  return uri
 
 
 def nowIso() -> str:
@@ -344,7 +359,9 @@ def main() -> int:
     config = OVFSConfig.load(config_path=args.config, profile=args.profile)
 
     with OVFSClient(config) as client:
+      _stamp("client_ready")
       targetUri, finalSlug, willCreate = chooseTargetUri(client, requestedUri, args.on_conflict)
+      _stamp("choose_target_end")
       finalRelPath = "wiki/syntheses/" + PurePosixPath(targetUri).name
 
       synthesisMarkdown = render_synthesis_markdown(
@@ -353,10 +370,14 @@ def main() -> int:
         normalizedInput["answerMarkdown"],
         normalizedInput["usedPages"],
       )
+      _stamp("render_end")
 
       indexText = readIfExists(client, kbRoot + "wiki/index.md", INDEX_TITLE + "\n")
+      _stamp("read_index_end")
       overviewText = readIfExists(client, kbRoot + "wiki/overview.md", OVERVIEW_TITLE + "\n")
+      _stamp("read_overview_end")
       logText = readIfExists(client, kbRoot + "wiki/log.md", LOG_TITLE)
+      _stamp("read_log_end")
 
       linkPath = f"syntheses/{finalSlug}.md"
       newIndexText = upsert_index_link_bullet(indexText, "## 综合结论", linkPath, normalizedInput["title"])
@@ -367,11 +388,19 @@ def main() -> int:
       newLogText = appendLogEntry(logText, f"已保存综合结论 {finalSlug} 到 {finalRelPath}")
 
       if not args.dry_run:
-        client.write_text(targetUri, synthesisMarkdown, create=willCreate, wait=True)
-        client.write_text(kbRoot + "wiki/index.md", newIndexText, create=False, wait=True)
+        _stamp("write_synthesis_start")
+        client.write_text(targetUri, synthesisMarkdown, create=willCreate, wait=False)
+        _stamp("write_synthesis_end")
+        indexWriteUri = resolveWriteUri(client, kbRoot + "wiki/index.md")
+        client.write_text(indexWriteUri, newIndexText, create=False, wait=False)
+        _stamp("write_index_end")
         if newOverviewText != overviewText:
-          client.write_text(kbRoot + "wiki/overview.md", newOverviewText, create=False, wait=True)
-        client.write_text(kbRoot + "wiki/log.md", newLogText, create=False, wait=True)
+          overviewWriteUri = resolveWriteUri(client, kbRoot + "wiki/overview.md")
+          client.write_text(overviewWriteUri, newOverviewText, create=False, wait=False)
+        _stamp("write_overview_end")
+        logWriteUri = resolveWriteUri(client, kbRoot + "wiki/log.md")
+        client.write_text(logWriteUri, newLogText, create=False, wait=False)
+        _stamp("write_log_end")
 
       result = {
         "status": "ok",
@@ -393,6 +422,15 @@ def main() -> int:
         "requested_relative_path": relPath,
         "requested_slug": requestedSlug,
       }
+      if len(_phaseTimes) >= 2:
+        result["phase_durations_ms"] = {}
+        for i in range(1, len(_phaseTimes)):
+          prev = _phaseTimes[i - 1]
+          curr = _phaseTimes[i]
+          dur = round((curr["ts"] - prev["ts"]) * 1000)
+          result["phase_durations_ms"][curr["label"]] = dur
+        totalMs = round((_phaseTimes[-1]["ts"] - _phaseTimes[0]["ts"]) * 1000)
+        result["phase_durations_ms"]["total_writes_ms"] = totalMs
       print_json(result, pretty=args.pretty)
       return 0
   except Exception as exc:

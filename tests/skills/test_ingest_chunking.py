@@ -1,5 +1,6 @@
 from importlib.util import module_from_spec, spec_from_file_location
 import json
+from typing import Any
 from pathlib import Path
 import sys
 
@@ -27,6 +28,7 @@ class FakeOVFSClient:
       "viking://resources/demo/wiki/overview.md": "# 概览\n",
       "viking://resources/demo/wiki/log.md": "# 操作日志\n",
     }
+    self.write_text_calls: list[dict[str, Any]] = []
 
   def __enter__(self):
     return self
@@ -52,6 +54,14 @@ class FakeOVFSClient:
     return []
 
   def write_text(self, uri: str, markdown: str, create: bool, wait: bool) -> None:
+    self.write_text_calls.append(
+      {
+        "uri": uri,
+        "markdown": markdown,
+        "create": create,
+        "wait": wait,
+      }
+    )
     self.texts[uri] = markdown
 
 
@@ -61,7 +71,8 @@ def setup_main_monkeypatch(
   source_text: str,
   argv_extra: list[str],
   call_llm_impl,
-) -> None:
+  dry_run: bool = True,
+) -> FakeOVFSClient:
   client = FakeOVFSClient(source_text)
 
   class DummyConfig:
@@ -79,19 +90,20 @@ def setup_main_monkeypatch(
   )
   monkeypatch.setattr(module, "read_local_schema", lambda: "# schema")
   monkeypatch.setattr(module, "call_llm", call_llm_impl)
-  monkeypatch.setattr(
-    sys,
-    "argv",
-    [
-      "ingest.py",
-      "--kb-name",
-      "demo",
-      "--source-uri",
-      "viking://resources/demo/raw/long.md",
-      "--dry-run",
-      *argv_extra,
-    ],
-  )
+
+  argv = [
+    "ingest.py",
+    "--kb-name",
+    "demo",
+    "--source-uri",
+    "viking://resources/demo/raw/long.md",
+  ]
+  if dry_run:
+    argv.append("--dry-run")
+  argv.extend(argv_extra)
+  monkeypatch.setattr(sys, "argv", argv)
+
+  return client
 
 
 def test_split_markdown_into_chunks_prefers_heading_break() -> None:
@@ -348,3 +360,83 @@ def test_main_long_doc_result_contains_new_fields(
   assert result["chunks_truncated"] is False
   assert result["summary_failures"] == 0
   assert result["partial_chunks_used"] is False
+
+
+def test_main_default_write_wait_false_and_outputs_async_mode(
+  monkeypatch: pytest.MonkeyPatch,
+  capsys: pytest.CaptureFixture[str],
+) -> None:
+  source_text = "# T\nshort"
+
+  def fake_call_llm(prompt: str, *, api_key, base_url, model):
+    return {
+      "source_title": "短文档",
+      "source_page_markdown": "# 短文档\n\n正文",
+      "entity_pages": [
+        {"slug": "entity-a", "title": "实体A", "markdown": "# 实体A\n\n正文"}
+      ],
+      "concept_pages": [
+        {"slug": "concept-a", "title": "概念A", "markdown": "# 概念A\n\n正文"}
+      ],
+      "overview_note": "新增短文档。",
+      "log_note": "ingest 短文档。",
+    }
+
+  client = setup_main_monkeypatch(
+    monkeypatch,
+    source_text=source_text,
+    argv_extra=[],
+    call_llm_impl=fake_call_llm,
+    dry_run=False,
+  )
+
+  exit_code = module.main()
+  output = capsys.readouterr().out
+  result = json.loads(output)
+
+  assert exit_code == 0
+  assert result["status"] == "ok"
+  assert result["write_wait_for_indexing"] is False
+  assert result["semantic_indexing_mode"] == "async"
+  assert len(client.write_text_calls) > 0
+  assert all(call["wait"] is False for call in client.write_text_calls)
+
+
+def test_main_wait_for_indexing_writes_with_wait_true_and_outputs_sync_mode(
+  monkeypatch: pytest.MonkeyPatch,
+  capsys: pytest.CaptureFixture[str],
+) -> None:
+  source_text = "# T\nshort"
+
+  def fake_call_llm(prompt: str, *, api_key, base_url, model):
+    return {
+      "source_title": "短文档",
+      "source_page_markdown": "# 短文档\n\n正文",
+      "entity_pages": [
+        {"slug": "entity-a", "title": "实体A", "markdown": "# 实体A\n\n正文"}
+      ],
+      "concept_pages": [
+        {"slug": "concept-a", "title": "概念A", "markdown": "# 概念A\n\n正文"}
+      ],
+      "overview_note": "新增短文档。",
+      "log_note": "ingest 短文档。",
+    }
+
+  client = setup_main_monkeypatch(
+    monkeypatch,
+    source_text=source_text,
+    argv_extra=["--wait-for-indexing"],
+    call_llm_impl=fake_call_llm,
+    dry_run=False,
+  )
+
+  exit_code = module.main()
+  output = capsys.readouterr().out
+  result = json.loads(output)
+
+  assert exit_code == 0
+  assert result["status"] == "ok"
+  assert result["write_wait_for_indexing"] is True
+  assert result["semantic_indexing_mode"] == "sync"
+  assert len(client.write_text_calls) > 0
+  assert all(call["wait"] is True for call in client.write_text_calls)

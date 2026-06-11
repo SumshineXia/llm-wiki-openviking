@@ -112,6 +112,7 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
    - 「对 `<kb>` 执行 wiki-health，检查结构是否完整」
 3. `wiki-ingest`
    - 「把 `<kb>` 的 `raw/<source>.md` ingest 成 wiki 页面，并更新 index/overview/log」
+   - 说明：`wiki-ingest` 默认快速异步写入，不等待 OpenViking 后台 semantic/embedding/indexing 完成；刚写完后可直接读取页面，但语义 search/query 可能需要等待后台处理完成。如必须 ingest 结束后立刻进行语义检索，可使用 `--wait-for-indexing`。
 4. `wiki-query`
    - 「基于 `<kb>` 回答这个问题：`<问题>`」
 5. `wiki-save`
@@ -163,6 +164,10 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
 ### Q5：graph 文件在哪？
 
 默认在远端：`viking://resources/<kb>/wiki/graph/graph.json` 与 `viking://resources/<kb>/wiki/graph/graph.html`。
+
+### Q6：为什么 wiki-ingest 结束后马上 query 可能搜不到新内容？
+
+`wiki-ingest` 默认不等待 OpenViking 后台 semantic/embedding/indexing 完成，因此页面已经写入后，语义检索索引可能还在后台更新。稍等后台处理完成后再 query 即可；如果必须同步等待，可在 ingest 时加 `--wait-for-indexing`，但会明显变慢。
 
 ---
 
