@@ -34,6 +34,9 @@ SECTION_HEADING_ALIASES = {
 WIKI_DERIVED_FILE_NAMES = {".abstract.md", ".overview.md", ".relations.json"}
 BUNDLE_METADATA_FILE_NAMES = {"abstract.md"}
 
+NESTED_CONTENT_PRIMARY_FILE_NAMES = ("关键内容.md", "content.md", "index.md", "README.md", "readme.md")
+NESTED_CONTENT_DEFERRED_PREFIXES = ("摘要_", "相关实体_")
+
 _HEADING_TO_SECTION_KEY = {
   heading: sectionKey
   for sectionKey, headings in SECTION_HEADING_ALIASES.items()
@@ -151,6 +154,52 @@ def find_direct_content_child(client: Any, uri: str, extensions: tuple[str, ...]
   return candidates[0] if candidates else None
 
 
+def list_recursive_content_children(client: Any, uri: str, extensions: tuple[str, ...] = (".md",)) -> list[str]:
+  targetUri = uri.rstrip("/") + "/"
+  try:
+    items = client.ls(targetUri, recursive=True)
+  except OVFSHTTPError as exc:
+    message = str(exc).lower()
+    if "404" in message or "not found" in message:
+      return []
+    raise
+
+  candidates: list[str] = []
+  for item in items:
+    childUri = extract_uri_from_ls_item(item)
+    if not childUri:
+      continue
+    name = PurePosixPath(childUri.rstrip("/")).name
+    if name in WIKI_DERIVED_FILE_NAMES or name in BUNDLE_METADATA_FILE_NAMES:
+      continue
+    if not name.endswith(extensions):
+      continue
+    childIsDir = _extract_child_is_dir_hint(item)
+    if childIsDir is None:
+      childStat = get_uri_stat(client, childUri)
+      childIsDir = bool(childStat and _is_dir_stat(childStat))
+    if childIsDir:
+      continue
+    candidates.append(childUri)
+
+  return candidates
+
+
+def choose_recursive_content_child(candidates: list[str]) -> str | None:
+  if not candidates:
+    return None
+
+  def score(uri: str) -> tuple[int, list[Any], str]:
+    name = PurePosixPath(uri).name
+    if name in NESTED_CONTENT_PRIMARY_FILE_NAMES:
+      return (0, _natural_sort_key(name), uri)
+    if any(name.startswith(prefix) for prefix in NESTED_CONTENT_DEFERRED_PREFIXES):
+      return (2, _natural_sort_key(name), uri)
+    return (1, _natural_sort_key(name), uri)
+
+  return sorted(candidates, key=score)[0]
+
+
 def resolve_canonical_markdown_uri(client: Any, uri: str) -> str | None:
   stat = get_uri_stat(client, uri)
   if not stat:
@@ -166,6 +215,10 @@ def resolve_canonical_markdown_uri(client: Any, uri: str) -> str | None:
   sameNameStat = get_uri_stat(client, sameNameUri)
   if sameNameStat and not _is_dir_stat(sameNameStat):
     return sameNameUri
+
+  recursiveChild = choose_recursive_content_child(list_recursive_content_children(client, uri, extensions=(".md",)))
+  if recursiveChild:
+    return recursiveChild
 
   return None
 
@@ -185,6 +238,10 @@ def resolve_markdown_write_target_uri(client: Any, uri: str) -> tuple[str, bool]
   directChild = find_direct_content_child(client, uri, extensions=(".md",))
   if directChild:
     return directChild, False
+
+  recursiveChild = choose_recursive_content_child(list_recursive_content_children(client, uri, extensions=(".md",)))
+  if recursiveChild:
+    return recursiveChild, False
 
   return sameNameUri, True
 

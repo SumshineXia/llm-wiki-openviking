@@ -234,42 +234,62 @@ def resolve_openai_settings(args: argparse.Namespace) -> Dict[str, Optional[str]
     }
 
 
+DERIVED_OR_METADATA_FILE_NAMES = {
+    ".abstract.md",
+    ".overview.md",
+    ".relations.json",
+    "abstract.md",
+}
+
+
+def is_dir_stat(stat: dict[str, Any]) -> bool:
+    if isinstance(stat.get("isDir"), bool):
+        return stat["isDir"]
+    if isinstance(stat.get("is_dir"), bool):
+        return stat["is_dir"]
+    return str(stat.get("type", "")).lower() in {"dir", "directory", "folder"}
+
+
+def extract_child_is_dir_hint(item: Any) -> bool | None:
+    if not isinstance(item, dict):
+        return None
+    if isinstance(item.get("isDir"), bool):
+        return item["isDir"]
+    if isinstance(item.get("is_dir"), bool):
+        return item["is_dir"]
+    if str(item.get("type", "")).lower() in {"dir", "directory", "folder"}:
+        return True
+    return None
+
+
 def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> str | None:
     if not uri.endswith("/"):
         uri = uri.rstrip("/") + "/"
     try:
         children = client.ls(uri, recursive=False)
-    except Exception:
-        return None
+    except OVFSHTTPError as exc:
+        message = str(exc).lower()
+        if "404" in message or "not found" in message:
+            return None
+        raise
 
     candidates: list[str] = []
 
     for child in children:
-        child_uri: str | None = None
-        child_is_dir: bool | None = None
-
-        if isinstance(child, str):
-            child_uri = child
-        elif isinstance(child, dict):
-            child_uri = child.get("uri") or child.get("path")
-            if isinstance(child.get("isDir"), bool):
-                child_is_dir = child["isDir"]
-
-        if not child_uri or not isinstance(child_uri, str):
+        child_uri = extract_uri_from_ls_item(child)
+        if not child_uri:
             continue
 
         name = PurePosixPath(child_uri).name
-
-        if name == "abstract.md":
+        if name in DERIVED_OR_METADATA_FILE_NAMES:
             continue
-
         if not name.endswith(extensions):
             continue
 
+        child_is_dir = extract_child_is_dir_hint(child)
         if child_is_dir is None:
             child_stat = get_uri_stat(client, child_uri)
-            child_is_dir = bool(child_stat and child_stat.get("isDir", False))
-
+            child_is_dir = bool(child_stat and is_dir_stat(child_stat))
         if child_is_dir:
             continue
 
@@ -298,12 +318,58 @@ def get_uri_stat(client: OVFSClient, uri: str) -> Dict[str, Any] | None:
         raise
 
 
+def list_recursive_content_children(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> list[str]:
+    target_uri = uri.rstrip("/") + "/"
+    try:
+        items = client.ls(target_uri, recursive=True)
+    except OVFSHTTPError as exc:
+        message = str(exc).lower()
+        if "404" in message or "not found" in message:
+            return []
+        raise
+
+    candidates: list[str] = []
+    for item in items:
+        child_uri = extract_uri_from_ls_item(item)
+        if not child_uri:
+            continue
+        name = PurePosixPath(child_uri.rstrip("/")).name
+        if name in DERIVED_OR_METADATA_FILE_NAMES:
+            continue
+        if not name.endswith(extensions):
+            continue
+        child_is_dir = extract_child_is_dir_hint(item)
+        if child_is_dir is None:
+            child_stat = get_uri_stat(client, child_uri)
+            child_is_dir = bool(child_stat and is_dir_stat(child_stat))
+        if child_is_dir:
+            continue
+        candidates.append(child_uri)
+
+    return candidates
+
+
+def choose_recursive_content_child(candidates: list[str]) -> str | None:
+    if not candidates:
+        return None
+
+    def score(uri: str) -> tuple[int, str, str]:
+        name = PurePosixPath(uri).name
+        if name in {"关键内容.md", "content.md", "index.md", "README.md", "readme.md"}:
+            return (0, name.lower(), uri)
+        if name.startswith("摘要_") or name.startswith("相关实体_"):
+            return (2, name.lower(), uri)
+        return (1, name.lower(), uri)
+
+    return sorted(candidates, key=score)[0]
+
+
 def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
     stat = get_uri_stat(client, uri)
     if not stat:
         return None
 
-    if not stat.get("isDir", False):
+    if not is_dir_stat(stat):
         return uri
 
     direct_child = find_direct_content_child(client, uri, extensions=(".md",))
@@ -311,44 +377,15 @@ def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
         return direct_child
 
     basename = PurePosixPath(uri.rstrip("/")).name
-    if not basename:
-        return None
+    if basename:
+        nested_uri = uri.rstrip("/") + f"/{basename}"
+        nested_stat = get_uri_stat(client, nested_uri)
+        if nested_stat and not is_dir_stat(nested_stat):
+            return nested_uri
 
-    nested_uri = uri.rstrip("/") + f"/{basename}"
-    nested_stat = get_uri_stat(client, nested_uri)
-    if nested_stat and not nested_stat.get("isDir", False):
-        return nested_uri
-
-    try:
-        children = client.ls(uri.rstrip("/") + "/", recursive=False)
-    except Exception:
-        children = []
-
-    for child in children:
-        child_uri: str | None = None
-        child_is_dir: bool | None = None
-
-        if isinstance(child, str):
-            child_uri = child
-        elif isinstance(child, dict):
-            child_uri = child.get("uri") or child.get("path")
-            if isinstance(child.get("isDir"), bool):
-                child_is_dir = child["isDir"]
-
-        if not child_uri or not isinstance(child_uri, str):
-            continue
-        if not child_uri.endswith(".md"):
-            continue
-        name = PurePosixPath(child_uri).name
-        if name == "abstract.md":
-            continue
-
-        if child_is_dir is None:
-            child_stat = get_uri_stat(client, child_uri)
-            child_is_dir = bool(child_stat and child_stat.get("isDir", False))
-
-        if not child_is_dir:
-            return child_uri
+    recursive_child = choose_recursive_content_child(list_recursive_content_children(client, uri, extensions=(".md",)))
+    if recursive_child:
+        return recursive_child
 
     return None
 
@@ -810,21 +847,60 @@ def upsert_index_link_bullet(index_text: str, section_key: str, link_path: str, 
     return append_unique_bullet(text, section_key, bullet)
 
 
-def build_overview_note(link_path: str, title: str) -> str:
-    return f"- [[{link_path}]] - {title}"
+def build_overview_note(link_path: str, title: str, body: str | None = None) -> str:
+    bullet = f"- [[{link_path}]] - {title}"
+    if body and body.strip():
+        return f"### {title} ({now_iso()})\n\n{body.strip()}\n\n{bullet}"
+    return f"### {title} ({now_iso()})\n\n{bullet}"
+
+
+def find_synthesis_overview_block_range(overview_text: str, link_path: str) -> tuple[int, int] | None:
+    start_tag = f"<!-- synthesis:{link_path}:start -->"
+    end_tag = f"<!-- synthesis:{link_path}:end -->"
+    legacy_pattern = re.compile(
+        rf"{re.escape(start_tag)}\n.*?\n{re.escape(end_tag)}",
+        re.DOTALL,
+    )
+    legacy_match = legacy_pattern.search(overview_text)
+    if legacy_match:
+        return legacy_match.start(), legacy_match.end()
+
+    lines = overview_text.splitlines(keepends=True)
+    offset = 0
+    current_heading_start: int | None = None
+    current_block_start: int | None = None
+    current_block_end: int | None = None
+    bullet_line = f"- [[{link_path}]] - "
+
+    for line in lines:
+        line_start = offset
+        offset += len(line)
+        if re.match(r"^#{1,6} ", line):
+            if current_block_start is not None and current_block_end is not None:
+                return current_block_start, current_block_end
+            current_heading_start = line_start
+            current_block_start = None
+            current_block_end = None
+            continue
+        if current_heading_start is not None and bullet_line in line:
+            current_block_start = current_heading_start
+            current_block_end = offset
+
+    if current_block_start is not None and current_block_end is not None:
+        return current_block_start, current_block_end
+
+    return None
 
 
 def upsert_overview_synthesis_block(overview_text: str, link_path: str, note: str) -> str:
-    start_tag = f"<!-- synthesis:{link_path}:start -->"
-    end_tag = f"<!-- synthesis:{link_path}:end -->"
-    block = f"{start_tag}\n{note}\n{end_tag}"
-    pattern = re.compile(
-        rf"{re.escape(start_tag)}\\n.*?\\n{re.escape(end_tag)}",
-        re.DOTALL,
-    )
-    if pattern.search(overview_text):
-        return pattern.sub(block, overview_text, count=1)
-    return overview_text.rstrip() + "\n\n" + block + "\n"
+    normalized_note = note.strip()
+    block_range = find_synthesis_overview_block_range(overview_text, link_path)
+
+    if block_range:
+        start, end = block_range
+        return (overview_text[:start].rstrip() + "\n\n" + normalized_note + overview_text[end:]).rstrip() + "\n"
+
+    return overview_text.rstrip() + "\n\n" + normalized_note + "\n"
 
 
 def append_log_entry(log_text: str, entry: str) -> str:

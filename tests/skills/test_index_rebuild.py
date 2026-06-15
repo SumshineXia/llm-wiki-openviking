@@ -386,3 +386,59 @@ def test_rebuild_index_text_keeps_existing_order_and_sorts_new_items() -> None:
   assert entitySection.index("- [[entities/b.md]] - 旧 B") < entitySection.index("- [[entities/a.md]] - 旧 A")
   assert entitySection.index("- [[entities/a.md]] - 旧 A") < entitySection.index("- [[entities/c.md]] - Charlie")
   assert entitySection.index("- [[entities/c.md]] - Charlie") < entitySection.index("- [[entities/d.md]] - Delta")
+
+
+def test_resolve_canonical_markdown_uri_prefers_nested_primary_content_file() -> None:
+  kbRoot = "viking://resources/demo/"
+  bundleUri = f"{kbRoot}wiki/sources/readme.md"
+  nestedDirUri = f"{bundleUri}/llm-wiki-openviking_用户使用版"
+  summaryUri = f"{nestedDirUri}/摘要_ca49982d.md"
+  relatedUri = f"{nestedDirUri}/相关实体_3more_18dd58ba.md"
+  primaryUri = f"{nestedDirUri}/关键内容.md"
+  client = FakeClient(
+    stats={
+      bundleUri: {"isDir": True},
+      nestedDirUri: {"isDir": True},
+      summaryUri: {"isDir": False},
+      relatedUri: {"isDir": False},
+      primaryUri: {"isDir": False},
+    },
+    listings={
+      (f"{bundleUri}/", False): [
+        {"uri": nestedDirUri, "isDir": True},
+      ],
+      (f"{bundleUri}/", True): [
+        {"uri": nestedDirUri, "isDir": True},
+        {"uri": summaryUri, "isDir": False},
+        {"uri": relatedUri, "isDir": False},
+        {"uri": primaryUri, "isDir": False},
+      ],
+    },
+  )
+
+  assert module.resolve_canonical_markdown_uri(client, bundleUri) == primaryUri
+
+
+def test_resolve_markdown_write_target_uri_prefers_nested_primary_content_file() -> None:
+  kbRoot = "viking://resources/demo/"
+  bundleUri = f"{kbRoot}wiki/sources/readme.md"
+  nestedDirUri = f"{bundleUri}/llm-wiki-openviking_用户使用版"
+  primaryUri = f"{nestedDirUri}/关键内容.md"
+  client = FakeClient(
+    stats={
+      bundleUri: {"isDir": True},
+      nestedDirUri: {"isDir": True},
+      primaryUri: {"isDir": False},
+    },
+    listings={
+      (f"{bundleUri}/", False): [
+        {"uri": nestedDirUri, "isDir": True},
+      ],
+      (f"{bundleUri}/", True): [
+        {"uri": nestedDirUri, "isDir": True},
+        {"uri": primaryUri, "isDir": False},
+      ],
+    },
+  )
+
+  assert module.resolve_markdown_write_target_uri(client, bundleUri) == (primaryUri, False)

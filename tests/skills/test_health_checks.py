@@ -353,3 +353,117 @@ def test_main_repair_index_only_writes_index_once(monkeypatch: pytest.MonkeyPatc
     "wait": True,
   }]
   assert json.loads(json.dumps(report))["repair"]["index_write_uri"] == index_write_uri
+
+
+def test_check_index_targets_accepts_nested_source_bundle() -> None:
+  kb_root = "viking://resources/my-kb/"
+  index_uri = f"{kb_root}wiki/index.md"
+  bundle_uri = f"{kb_root}wiki/sources/readme.md"
+  nested_dir_uri = f"{bundle_uri}/llm-wiki-openviking_用户使用版"
+  primary_uri = f"{nested_dir_uri}/关键内容.md"
+  client = FakeClient(
+    texts={
+      index_uri: "# 索引\n\n## 资料来源\n- [[sources/readme.md]] - README\n",
+      primary_uri: "# README\n\n正文内容足够长，用于通过有效页面判断。\n",
+    },
+    stats={
+      index_uri: {"isDir": False},
+      bundle_uri: {"isDir": True},
+      nested_dir_uri: {"isDir": True},
+      primary_uri: {"isDir": False},
+    },
+    listings={
+      (f"{bundle_uri}/", False): [
+        {"uri": nested_dir_uri, "isDir": True},
+      ],
+      (f"{bundle_uri}/", True): [
+        {"uri": nested_dir_uri, "isDir": True},
+        {"uri": primary_uri, "isDir": False},
+      ],
+    },
+  )
+
+  linked, broken = check_index_targets(client, kb_root)
+
+  assert linked == ["sources/readme.md"]
+  assert broken == []
+
+
+def test_main_repair_index_keeps_nested_source_bundle_link_without_broken_target(monkeypatch: pytest.MonkeyPatch) -> None:
+  kb_root = "viking://resources/my-kb/"
+  index_uri = f"{kb_root}wiki/index.md"
+  index_write_uri = f"{kb_root}wiki/index.md/index.md"
+  overview_uri = f"{kb_root}wiki/overview.md"
+  log_uri = f"{kb_root}wiki/log.md"
+  bundle_uri = f"{kb_root}wiki/sources/readme.md"
+  nested_dir_uri = f"{bundle_uri}/llm-wiki-openviking_用户使用版"
+  primary_uri = f"{nested_dir_uri}/关键内容.md"
+  required_file_uris = required_wiki_pages(kb_root)
+  writes: list[dict[str, object]] = []
+  printed: list[dict[str, object]] = []
+
+  class RepairClient(FakeClient):
+    def __enter__(self):
+      return self
+
+    def __exit__(self, exc_type, exc, tb):
+      return False
+
+    def write_text(self, uri: str, text: str, *, create: bool, wait: bool) -> None:
+      writes.append({"uri": uri, "text": text, "create": create, "wait": wait})
+      self.texts[uri] = text
+      self.stats[uri] = {"isDir": False}
+
+  repair_client = RepairClient(
+    texts={
+      index_write_uri: "# 索引\n\n## 资料来源\n- [[sources/readme.md]] - README\n",
+      overview_uri: "# 概览\n\n这是一个足够长的概览内容，用于通过有效页面判断。",
+      log_uri: "# 操作日志\n\n记录\n",
+      primary_uri: "# README\n\n正文内容足够长，用于通过有效页面判断。\n",
+    },
+    stats={
+      **{f"{kb_root}{rel}": {"isDir": True} for rel in requiredDirs},
+      **{uri: {"isDir": False} for uri in required_file_uris if uri != index_uri},
+      index_uri: {"isDir": True},
+      index_write_uri: {"isDir": False},
+      bundle_uri: {"isDir": True},
+      nested_dir_uri: {"isDir": True},
+      primary_uri: {"isDir": False},
+    },
+    listings={
+      (f"{kb_root}wiki/index.md/", False): [{"uri": index_write_uri, "isDir": False}],
+      (f"{kb_root}wiki/", True): [
+        {"uri": index_write_uri, "isDir": False},
+        {"uri": overview_uri, "isDir": False},
+        {"uri": log_uri, "isDir": False},
+        {"uri": nested_dir_uri, "isDir": True},
+        {"uri": primary_uri, "isDir": False},
+      ],
+      (f"{kb_root}wiki/sources/", True): [
+        {"uri": nested_dir_uri, "isDir": True},
+        {"uri": primary_uri, "isDir": False},
+      ],
+      (f"{bundle_uri}/", False): [{"uri": nested_dir_uri, "isDir": True}],
+      (f"{bundle_uri}/", True): [
+        {"uri": nested_dir_uri, "isDir": True},
+        {"uri": primary_uri, "isDir": False},
+      ],
+      (f"{kb_root}wiki/entities/", True): [],
+      (f"{kb_root}wiki/concepts/", True): [],
+      (f"{kb_root}wiki/syntheses/", True): [],
+    },
+  )
+
+  monkeypatch.setattr(module.OVFSConfig, "load", staticmethod(lambda config_path=None, profile=None: object()))
+  monkeypatch.setattr(module, "OVFSClient", lambda config: repair_client)
+  monkeypatch.setattr(module, "build_kb_root", lambda kb_name: kb_root)
+  monkeypatch.setattr(module, "print_json", lambda data, pretty=False: printed.append(data))
+  monkeypatch.setattr(module.sys, "argv", ["health.py", "--kb-name", "my-kb", "--repair-index"])
+
+  exit_code = module.main()
+
+  assert exit_code in (0, 1)
+  report = printed[0]
+  assert report["repair"]["index_rebuilt"] is True
+  assert report["details"]["broken_index_targets"] == []
+  assert "[[sources/readme.md]]" in writes[0]["text"]

@@ -133,7 +133,7 @@ def test_overview_should_write_synthesis_block(monkeypatch, tmp_path: Path, caps
 
   class FakeClient:
     def __init__(self, _config) -> None:
-      self.writeCalls = []
+      self.writeCalls: list[tuple[str, str, bool, bool]] = []
 
     def __enter__(self):
       return self
@@ -157,7 +157,7 @@ def test_overview_should_write_synthesis_block(monkeypatch, tmp_path: Path, caps
       return "# 操作日志\n"
 
     def write_text(self, uri: str, content: str, create: bool, wait: bool) -> None:
-      self.writeCalls.append(uri)
+      self.writeCalls.append((uri, content, create, wait))
 
   fakeClient = FakeClient(None)
   monkeypatch.setattr(
@@ -170,9 +170,15 @@ def test_overview_should_write_synthesis_block(monkeypatch, tmp_path: Path, caps
 
   code = module.main()
   output = json.loads(capsys.readouterr().out)
+  overviewWrite = next(
+    content for uri, content, _create, _wait in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md"
+  )
+
   assert code == 0
   assert output["status"] == "ok"
-  assert "viking://resources/kb/wiki/overview.md" in fakeClient.writeCalls
+  assert "<!-- synthesis:" not in overviewWrite
+  assert "### t (" in overviewWrite
+  assert "- [[syntheses/t.md]] - t" in overviewWrite
 
 
 def test_save_rebuilds_index_and_preserves_manual_sections(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -293,3 +299,190 @@ def test_save_fails_when_index_bundle_listing_returns_non_not_found_error(monkey
   assert code == 1
   assert output["error_type"] == "OVFSHTTPError"
   assert "500 temporary failure" in output["error"]
+
+
+def test_save_overview_note_keeps_heading_block(monkeypatch, tmp_path: Path, capsys) -> None:
+  answerPath = tmp_path / "answer.md"
+  answerPath.write_text("答案", encoding="utf-8")
+
+  class FakeClient:
+    def __init__(self, _config) -> None:
+      self.writeCalls: list[tuple[str, str, bool, bool]] = []
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, excType, exc, tb) -> None:
+      return None
+
+    def stat(self, uri: str):
+      if uri.endswith("wiki/syntheses/t.md"):
+        raise module.OVFSHTTPError("404")
+      return {"isDir": False}
+
+    def ls(self, uri: str, recursive: bool = False):
+      return []
+
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("index.md"):
+        return "# 索引\n"
+      if uri.endswith("overview.md"):
+        return "# 概览\n"
+      return "# 操作日志\n"
+
+    def write_text(self, uri: str, content: str, create: bool, wait: bool) -> None:
+      self.writeCalls.append((uri, content, create, wait))
+
+  fakeClient = FakeClient(None)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "save.py",
+      "--kb-name",
+      "kb",
+      "--answer-file",
+      str(answerPath),
+      "--question",
+      "q",
+      "--title",
+      "t",
+      "--overview-note",
+      "这是自定义概览说明",
+    ],
+  )
+  monkeypatch.setattr(module, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(module.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+
+  code = module.main()
+  output = json.loads(capsys.readouterr().out)
+  overviewWrite = next(
+    content for uri, content, _create, _wait in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md"
+  )
+
+  assert code == 0
+  assert output["status"] == "ok"
+  assert "### t (" in overviewWrite
+  assert "这是自定义概览说明" in overviewWrite
+  assert "- [[syntheses/t.md]] - t" in overviewWrite
+  assert "<!-- synthesis:" not in overviewWrite
+
+
+def test_save_overview_note_reuses_existing_block(monkeypatch, tmp_path: Path, capsys) -> None:
+  answerPath = tmp_path / "answer.md"
+  answerPath.write_text("答案", encoding="utf-8")
+
+  class FakeClient:
+    def __init__(self, _config) -> None:
+      self.writeCalls: list[tuple[str, str, bool, bool]] = []
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, excType, exc, tb) -> None:
+      return None
+
+    def stat(self, uri: str):
+      return {"isDir": False}
+
+    def ls(self, uri: str, recursive: bool = False):
+      return []
+
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("index.md"):
+        return "# 索引\n"
+      if uri.endswith("overview.md"):
+        return "# 概览\n\n### t (2026-06-15T00:00:00Z)\n\n这是旧说明\n\n- [[syntheses/t.md]] - t\n"
+      return "# 操作日志\n"
+
+    def write_text(self, uri: str, content: str, create: bool, wait: bool) -> None:
+      self.writeCalls.append((uri, content, create, wait))
+
+  fakeClient = FakeClient(None)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "save.py",
+      "--kb-name",
+      "kb",
+      "--answer-file",
+      str(answerPath),
+      "--question",
+      "q",
+      "--title",
+      "t",
+      "--overview-note",
+      "这是新说明",
+      "--on-conflict",
+      "update",
+    ],
+  )
+  monkeypatch.setattr(module, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(module.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+
+  code = module.main()
+  output = json.loads(capsys.readouterr().out)
+  overviewWrite = next(
+    content for uri, content, _create, _wait in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md"
+  )
+
+  assert code == 0
+  assert output["status"] == "ok"
+  assert overviewWrite.count("### t (") == 1
+  assert overviewWrite.count("[[syntheses/t.md]]") == 1
+  assert "这是新说明" in overviewWrite
+
+
+def test_save_replaces_legacy_comment_block_with_timestamp_heading(monkeypatch, tmp_path: Path, capsys) -> None:
+  answerPath = tmp_path / "answer.md"
+  answerPath.write_text("答案", encoding="utf-8")
+
+  class FakeClient:
+    def __init__(self, _config) -> None:
+      self.writeCalls: list[tuple[str, str, bool, bool]] = []
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, excType, exc, tb) -> None:
+      return None
+
+    def stat(self, uri: str):
+      if uri.endswith("wiki/syntheses/t.md"):
+        raise module.OVFSHTTPError("404")
+      return {"isDir": False}
+
+    def ls(self, uri: str, recursive: bool = False):
+      return []
+
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("index.md"):
+        return "# 索引\n"
+      if uri.endswith("overview.md"):
+        return "# 概览\n\n<!-- synthesis:syntheses/t.md:start -->\n- [[syntheses/t.md]] - 旧标题\n<!-- synthesis:syntheses/t.md:end -->\n"
+      return "# 操作日志\n"
+
+    def write_text(self, uri: str, content: str, create: bool, wait: bool) -> None:
+      self.writeCalls.append((uri, content, create, wait))
+
+  fakeClient = FakeClient(None)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    ["save.py", "--kb-name", "kb", "--answer-file", str(answerPath), "--question", "q", "--title", "t"],
+  )
+  monkeypatch.setattr(module, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(module.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+
+  code = module.main()
+  output = json.loads(capsys.readouterr().out)
+  overviewWrite = next(
+    content for uri, content, _create, _wait in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md"
+  )
+
+  assert code == 0
+  assert output["status"] == "ok"
+  assert "<!-- synthesis:" not in overviewWrite
+  assert "### t (" in overviewWrite
+  assert "- [[syntheses/t.md]] - t" in overviewWrite

@@ -159,21 +159,60 @@ def upsert_index_link_bullet(indexText: str, heading: str, linkPath: str, title:
   return appendUniqueBullet(text, heading, bullet)
 
 
-def build_overview_note(linkPath: str, title: str) -> str:
-  return f"- [[{linkPath}]] - {title}"
+def build_overview_note(linkPath: str, title: str, body: str | None = None) -> str:
+  bullet = f"- [[{linkPath}]] - {title}"
+  if body and body.strip():
+    return f"### {title} ({nowIso()})\n\n{body.strip()}\n\n{bullet}"
+  return f"### {title} ({nowIso()})\n\n{bullet}"
+
+
+def find_synthesis_overview_block_range(overviewText: str, linkPath: str) -> tuple[int, int] | None:
+  startTag = f"<!-- synthesis:{linkPath}:start -->"
+  endTag = f"<!-- synthesis:{linkPath}:end -->"
+  legacyPattern = re.compile(
+    rf"{re.escape(startTag)}\n.*?\n{re.escape(endTag)}",
+    re.DOTALL,
+  )
+  legacyMatch = legacyPattern.search(overviewText)
+  if legacyMatch:
+    return legacyMatch.start(), legacyMatch.end()
+
+  lines = overviewText.splitlines(keepends=True)
+  offset = 0
+  currentHeadingStart: int | None = None
+  currentBlockStart: int | None = None
+  currentBlockEnd: int | None = None
+  bulletLine = f"- [[{linkPath}]] - "
+
+  for line in lines:
+    lineStart = offset
+    offset += len(line)
+    if re.match(r"^#{1,6} ", line):
+      if currentBlockStart is not None and currentBlockEnd is not None:
+        return currentBlockStart, currentBlockEnd
+      currentHeadingStart = lineStart
+      currentBlockStart = None
+      currentBlockEnd = None
+      continue
+    if currentHeadingStart is not None and bulletLine in line:
+      currentBlockStart = currentHeadingStart
+      currentBlockEnd = offset
+
+  if currentBlockStart is not None and currentBlockEnd is not None:
+    return currentBlockStart, currentBlockEnd
+
+  return None
 
 
 def upsert_overview_synthesis_block(overviewText: str, linkPath: str, note: str) -> str:
-  startTag = f"<!-- synthesis:{linkPath}:start -->"
-  endTag = f"<!-- synthesis:{linkPath}:end -->"
-  block = f"{startTag}\n{note}\n{endTag}"
-  pattern = re.compile(
-    rf"{re.escape(startTag)}\\n.*?\\n{re.escape(endTag)}",
-    re.DOTALL,
-  )
-  if pattern.search(overviewText):
-    return pattern.sub(block, overviewText, count=1)
-  return overviewText.rstrip() + "\n\n" + block + "\n"
+  normalizedNote = note.strip()
+  blockRange = find_synthesis_overview_block_range(overviewText, linkPath)
+
+  if blockRange:
+    start, end = blockRange
+    return (overviewText[:start].rstrip() + "\n\n" + normalizedNote + overviewText[end:]).rstrip() + "\n"
+
+  return overviewText.rstrip() + "\n\n" + normalizedNote + "\n"
 
 
 def appendLogEntry(logText: str, entry: str) -> str:
@@ -385,9 +424,8 @@ def main() -> int:
       linkPath = f"syntheses/{finalSlug}.md"
       touched_entries = {"syntheses": {linkPath: normalizedInput["title"]}}
       newIndexText = rebuild_index_text(client, kbRoot, indexText, touched_entries=touched_entries)
-      overviewNote = build_overview_note(linkPath, normalizedInput["title"])
-      if args.overview_note and args.overview_note.strip():
-        overviewNote = args.overview_note.strip()
+      overviewBody = args.overview_note.strip() if args.overview_note and args.overview_note.strip() else None
+      overviewNote = build_overview_note(linkPath, normalizedInput["title"], body=overviewBody)
       newOverviewText = upsert_overview_synthesis_block(overviewText, linkPath, overviewNote)
       newLogText = appendLogEntry(logText, f"已保存综合结论 {finalSlug} 到 {finalRelPath}")
 

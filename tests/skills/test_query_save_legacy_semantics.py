@@ -25,7 +25,10 @@ saveModule = module_from_spec(saveSpec)
 saveSpec.loader.exec_module(saveModule)
 
 
-def test_query_and_save_helper_outputs_are_consistent() -> None:
+def test_query_and_save_helper_outputs_are_consistent(monkeypatch) -> None:
+  monkeypatch.setattr(queryModule, "now_iso", lambda: "2026-06-15T00:00:00Z")
+  monkeypatch.setattr(saveModule, "nowIso", lambda: "2026-06-15T00:00:00Z")
+
   indexText = "# 索引\n\n## 综合结论\n- [[syntheses/existing.md]] - 旧标题\n"
   linkPath = "syntheses/existing.md"
   title = "新标题"
@@ -94,6 +97,70 @@ class FakeOVFSClientWithStaleManagedBullet(FakeOVFSClient):
     return super().read_text(uri)
 
 
+def test_legacy_save_replaces_legacy_comment_block_with_timestamp_heading(monkeypatch, capsys) -> None:
+  class FakeClient(FakeOVFSClient):
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("wiki/overview.md"):
+        return "# 概览\n\n<!-- synthesis:syntheses/标题.md:start -->\n- [[syntheses/标题.md]] - 旧标题\n<!-- synthesis:syntheses/标题.md:end -->\n"
+      return super().read_text(uri)
+
+  fakeClient = FakeClient(None)
+  monkeypatch.setattr(sys, "argv", ["query.py", "--kb-name", "kb", "--question", "q", "--save", "--slug", "标题"])
+  monkeypatch.setattr(queryModule, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(queryModule.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+  monkeypatch.setattr(queryModule, "read_local_schema", lambda: "schema")
+  monkeypatch.setattr(queryModule, "select_relevant_pages", lambda client, kb_root, question, top_k: [{"uri": "u1", "content": "c", "score": "1"}])
+  monkeypatch.setattr(
+    queryModule,
+    "call_llm",
+    lambda prompt, *, api_key, base_url, model: {"answer_markdown": "当前答案", "used_pages": ["u1"], "synthesis_title": "新标题"},
+  )
+  monkeypatch.setattr(queryModule, "resolve_openai_settings", lambda args: {"api_key": "k", "base_url": None, "model": "m"})
+  monkeypatch.setattr(queryModule, "write_temp_json_file", lambda data, pretty: Path("/tmp/payload.json"))
+
+  code = queryModule.main()
+  output = json.loads(capsys.readouterr().out)
+  writtenOverview = next(content for uri, content, _create in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md")
+
+  assert code == 0
+  assert output["overview_updated"] is True
+  assert "<!-- synthesis:syntheses/标题.md:start -->" not in writtenOverview
+  assert "### 新标题 (" in writtenOverview
+  assert "- [[syntheses/标题.md]] - 新标题" in writtenOverview
+
+
+def test_legacy_save_replaces_heading_block_without_swallowing_manual_note(monkeypatch, capsys) -> None:
+  class FakeClient(FakeOVFSClient):
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("wiki/overview.md"):
+        return "# 概览\n\n### 旧标题 (2026-06-15T00:00:00Z)\n\n- [[syntheses/标题.md]] - 旧标题\n\n手工备注\n"
+      return super().read_text(uri)
+
+  fakeClient = FakeClient(None)
+  monkeypatch.setattr(sys, "argv", ["query.py", "--kb-name", "kb", "--question", "q", "--save", "--slug", "标题"])
+  monkeypatch.setattr(queryModule, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(queryModule.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+  monkeypatch.setattr(queryModule, "read_local_schema", lambda: "schema")
+  monkeypatch.setattr(queryModule, "select_relevant_pages", lambda client, kb_root, question, top_k: [{"uri": "u1", "content": "c", "score": "1"}])
+  monkeypatch.setattr(
+    queryModule,
+    "call_llm",
+    lambda prompt, *, api_key, base_url, model: {"answer_markdown": "当前答案", "used_pages": ["u1"], "synthesis_title": "新标题"},
+  )
+  monkeypatch.setattr(queryModule, "resolve_openai_settings", lambda args: {"api_key": "k", "base_url": None, "model": "m"})
+  monkeypatch.setattr(queryModule, "write_temp_json_file", lambda data, pretty: Path("/tmp/payload.json"))
+
+  code = queryModule.main()
+  output = json.loads(capsys.readouterr().out)
+  writtenOverview = next(content for uri, content, _create in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md")
+
+  assert code == 0
+  assert output["overview_updated"] is True
+  assert "### 新标题 (" in writtenOverview
+  assert "- [[syntheses/标题.md]] - 新标题" in writtenOverview
+  assert "手工备注" in writtenOverview
+
+
 def test_legacy_save_updates_index_overview_log_and_returns_deprecated_fields(monkeypatch, capsys) -> None:
   fakeClient = FakeOVFSClient(None)
   monkeypatch.setattr(
@@ -135,6 +202,11 @@ def test_legacy_save_updates_index_overview_log_and_returns_deprecated_fields(mo
   assert "## 综合结论" in writtenIndex
   assert "syntheses/标题.md" in writtenIndex
   assert "<!-- synthesis:syntheses/标题.md:start -->" not in writtenIndex
+
+  writtenOverview = next(content for uri, content, _create in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/overview.md")
+  assert "<!-- synthesis:syntheses/标题.md:start -->" not in writtenOverview
+  assert "### 新标题 (" in writtenOverview
+  assert "- [[syntheses/标题.md]] - 新标题" in writtenOverview
 
 
 def test_legacy_save_preserves_non_managed_index_content(monkeypatch, capsys) -> None:
