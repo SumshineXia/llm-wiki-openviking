@@ -17,6 +17,7 @@ description: 当用户要求对 KB 执行 wiki-health（检查远端 wiki 结构
 ## 职责边界（不要做什么）
 
 - 只做结构完整性检查（目录、根页面、索引链接、source-log 覆盖）
+- 默认只检查，不写远端
 - 不调用 LLM，不做总结与润色
 - 不执行 ingest/query/lint/graph
 
@@ -29,6 +30,18 @@ bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name <kb-name> --
 ```
 
 可选参数：`--config <path>`、`--profile <name>`。
+
+当用户明确要求“修复 index / 重建 index / repair index”时，可运行：
+
+```bash
+bash ~/.config/opencode/skills/wiki-health/scripts/run.sh \
+  --kb-name <kb-name> \
+  --profile <profile> \
+  --repair-index \
+  --pretty
+```
+
+`--repair-index` 只重建 `wiki/index.md`，不删除页面，不调用 LLM，并保留 index 中 managed section 之外的手工内容。
 
 ## 强约束
 

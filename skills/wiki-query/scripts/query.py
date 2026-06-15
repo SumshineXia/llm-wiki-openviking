@@ -14,6 +14,7 @@ from openai import OpenAI
 
 from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
 from common import build_error_result, build_kb_root, load_config, print_json
+from wiki_index import rebuild_index_text
 
 
 DEFAULT_LLM_CONFIG_PATH = (
@@ -1080,7 +1081,17 @@ def main() -> int:
 
                 link_path = f"syntheses/{synthesis_slug}.md"
                 overview_note = build_overview_note(link_path, synthesis_title)
-                new_index_text = upsert_index_link_bullet(index_text, "syntheses", link_path, synthesis_title)
+                touched_entries = {
+                    "syntheses": {
+                        link_path: synthesis_title,
+                    },
+                }
+                new_index_text = rebuild_index_text(
+                    client,
+                    kb_root,
+                    index_text,
+                    touched_entries=touched_entries,
+                )
                 new_overview_text = upsert_overview_synthesis_block(overview_text, link_path, overview_note)
                 new_log_text = append_log_entry(
                     log_text,
@@ -1100,6 +1111,8 @@ def main() -> int:
                 result["created"] = should_create
                 result["updated"] = not should_create
                 result["overview_updated"] = new_overview_text != overview_text
+                result["index_update_mode"] = "rebuild"
+                result["touched_index_entries"] = touched_entries
 
             if args.output_file:
                 output_path = Path(args.output_file).expanduser()

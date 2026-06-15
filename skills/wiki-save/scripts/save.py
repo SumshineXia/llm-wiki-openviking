@@ -12,9 +12,9 @@ import time as _time
 
 from common import build_error_result, build_kb_root, print_json
 from ovfs import OVFSClient, OVFSConfig, OVFSHTTPError
+from wiki_index import rebuild_index_text, resolve_markdown_write_target_uri
 
 _phaseTimes: list[dict[str, Any]] = []
-
 
 def _stamp(label: str) -> None:
   _phaseTimes.append({"label": label, "ts": _time.monotonic()})
@@ -58,8 +58,11 @@ def findDirectContentChild(client: OVFSClient, uri: str) -> str | None:
   targetUri = uri.rstrip("/") + "/"
   try:
     children = client.ls(targetUri, recursive=False)
-  except Exception:
-    return None
+  except OVFSHTTPError as exc:
+    message = str(exc).lower()
+    if "404" in message or "not found" in message:
+      return None
+    raise
 
   candidates: list[str] = []
   for child in children:
@@ -380,7 +383,8 @@ def main() -> int:
       _stamp("read_log_end")
 
       linkPath = f"syntheses/{finalSlug}.md"
-      newIndexText = upsert_index_link_bullet(indexText, "## 综合结论", linkPath, normalizedInput["title"])
+      touched_entries = {"syntheses": {linkPath: normalizedInput["title"]}}
+      newIndexText = rebuild_index_text(client, kbRoot, indexText, touched_entries=touched_entries)
       overviewNote = build_overview_note(linkPath, normalizedInput["title"])
       if args.overview_note and args.overview_note.strip():
         overviewNote = args.overview_note.strip()
@@ -391,8 +395,8 @@ def main() -> int:
         _stamp("write_synthesis_start")
         client.write_text(targetUri, synthesisMarkdown, create=willCreate, wait=False)
         _stamp("write_synthesis_end")
-        indexWriteUri = resolveWriteUri(client, kbRoot + "wiki/index.md")
-        client.write_text(indexWriteUri, newIndexText, create=False, wait=False)
+        indexWriteUri, indexShouldCreate = resolve_markdown_write_target_uri(client, kbRoot + "wiki/index.md")
+        client.write_text(indexWriteUri, newIndexText, create=indexShouldCreate, wait=False)
         _stamp("write_index_end")
         if newOverviewText != overviewText:
           overviewWriteUri = resolveWriteUri(client, kbRoot + "wiki/overview.md")
@@ -421,6 +425,8 @@ def main() -> int:
         ],
         "requested_relative_path": relPath,
         "requested_slug": requestedSlug,
+        "index_update_mode": "rebuild",
+        "touched_index_entries": touched_entries,
       }
       if len(_phaseTimes) >= 2:
         result["phase_durations_ms"] = {}

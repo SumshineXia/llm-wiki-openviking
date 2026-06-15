@@ -10,12 +10,30 @@ from typing import Any
 try:
   from common import build_error_result, build_kb_root, print_json
   from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
+  from wiki_index import (
+    normalize_relative_wiki_target,
+    resolve_canonical_markdown_uri,
+    resolve_markdown_write_target_uri,
+    list_indexable_wiki_pages,
+    canonical_index_rel_path_from_uri,
+    rebuild_index_text,
+    read_page_title,
+  )
 except ModuleNotFoundError:
   scriptDir = Path(__file__).resolve().parent
   if str(scriptDir) not in sys.path:
     sys.path.insert(0, str(scriptDir))
   from common import build_error_result, build_kb_root, print_json
   from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
+  from wiki_index import (
+    normalize_relative_wiki_target,
+    resolve_canonical_markdown_uri,
+    resolve_markdown_write_target_uri,
+    list_indexable_wiki_pages,
+    canonical_index_rel_path_from_uri,
+    rebuild_index_text,
+    read_page_title,
+  )
 
 
 requiredDirs = [
@@ -57,63 +75,25 @@ def extract_uri_from_ls_item(item: Any) -> str | None:
   return None
 
 
-def normalize_relative_wiki_target(target: str) -> str | None:
-  target = target.strip()
-  if not target:
-    return None
-  if target.startswith("http://") or target.startswith("https://"):
-    return None
-  if target.startswith("#"):
-    return None
-
-  if target.startswith("wiki/"):
-    target = target[len("wiki/"):]
-
-  if "#" in target:
-    target = target.split("#", 1)[0]
-  if "?" in target:
-    target = target.split("?", 1)[0]
-
-  target = target.lstrip("/")
-
-  if target.endswith("/"):
-    return None
-
-  if not target.endswith(".md"):
-    target = f"{target}.md"
-
-  parts: list[str] = []
-  for part in PurePosixPath(target).parts:
-    if part in ("", "."):
-      continue
-    if part == "..":
-      if parts:
-        parts.pop()
-      continue
-    parts.append(part)
-
-  normalized = PurePosixPath(*parts).as_posix()
-  if not normalized:
-    return None
-
-  return normalized
-
-
 def extract_index_links(indexText: str) -> set[str]:
-  results: set[str] = set()
+  return set(extract_index_link_occurrences(indexText))
+
+
+def extract_index_link_occurrences(indexText: str) -> list[str]:
+  results: list[str] = []
 
   wikilinkPattern = re.compile(r"\[\[([^\]]+)\]\]")
   markdownLinkPattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
   for raw in wikilinkPattern.findall(indexText):
-    normalized = normalize_relative_wiki_target(raw)
+    normalized = normalize_relative_wiki_target(raw.split("|", 1)[0])
     if normalized:
-      results.add(normalized)
+      results.append(normalized)
 
   for raw in markdownLinkPattern.findall(indexText):
     normalized = normalize_relative_wiki_target(raw)
     if normalized:
-      results.add(normalized)
+      results.append(normalized)
 
   return results
 
@@ -131,67 +111,6 @@ def is_meaningful_page(text: str) -> bool:
   return contentChars >= 30
 
 
-def basename_without_ext(uri: str) -> str:
-  name = PurePosixPath(uri).name
-  if name.endswith(".md"):
-    return name[:-3]
-  return name
-
-
-def find_direct_content_child(client: OVFSClient, uri: str, extensions: tuple[str, ...] = (".md",)) -> str | None:
-    if not uri.endswith("/"):
-        uri = uri.rstrip("/") + "/"
-    try:
-        children = client.ls(uri, recursive=False)
-    except Exception:
-        return None
-
-    candidates: list[str] = []
-
-    for child in children:
-        childUri: str | None = None
-        childIsDir: bool | None = None
-
-        if isinstance(child, str):
-            childUri = child
-        elif isinstance(child, dict):
-            childUri = child.get("uri") or child.get("path")
-            if isinstance(child.get("isDir"), bool):
-                childIsDir = child["isDir"]
-
-        if not childUri or not isinstance(childUri, str):
-            continue
-
-        name = PurePosixPath(childUri).name
-
-        if name == "abstract.md":
-            continue
-
-        if not name.endswith(extensions):
-            continue
-
-        if childIsDir is None:
-            childStat = get_uri_stat(client, childUri)
-            childIsDir = bool(childStat and childStat.get("isDir", False))
-
-        if childIsDir:
-            continue
-
-        candidates.append(childUri)
-
-    parent_name = PurePosixPath(uri.rstrip("/")).name
-
-    for candidate in candidates:
-        if PurePosixPath(candidate).name == parent_name:
-            return candidate
-
-    for candidate in candidates:
-        if PurePosixPath(candidate).name.startswith("tmp"):
-            return candidate
-
-    return candidates[0] if candidates else None
-
-
 def get_uri_stat(client: OVFSClient, uri: str) -> dict[str, Any] | None:
   try:
     return client.stat(uri)
@@ -200,76 +119,6 @@ def get_uri_stat(client: OVFSClient, uri: str) -> dict[str, Any] | None:
     if "404" in message or "not found" in message:
       return None
     raise
-
-
-def resolve_canonical_markdown_uri(client: OVFSClient, uri: str) -> str | None:
-    stat = get_uri_stat(client, uri)
-    if not stat:
-        return None
-
-    if not stat.get("isDir", False):
-        return uri
-
-    direct_child = find_direct_content_child(client, uri, extensions=(".md",))
-    if direct_child:
-        return direct_child
-
-    basename = PurePosixPath(uri.rstrip("/")).name
-    if basename:
-        nestedCandidate = uri.rstrip("/") + f"/{basename}"
-        nestedStat = get_uri_stat(client, nestedCandidate)
-        if nestedStat and not nestedStat.get("isDir", False):
-            return nestedCandidate
-
-    try:
-        children = client.ls(uri.rstrip("/") + "/", recursive=False)
-    except Exception:
-        children = []
-
-    for child in children:
-        childUri: str | None = None
-        childIsDir: bool | None = None
-
-        if isinstance(child, str):
-            childUri = child
-        elif isinstance(child, dict):
-            childUri = child.get("uri") or child.get("path")
-            if isinstance(child.get("isDir"), bool):
-                childIsDir = child["isDir"]
-
-        if not childUri or not isinstance(childUri, str):
-            continue
-        if not childUri.endswith(".md"):
-            continue
-        name = PurePosixPath(childUri).name
-        if name == "abstract.md":
-            continue
-
-        if childIsDir is None:
-            childStat = get_uri_stat(client, childUri)
-            childIsDir = bool(childStat and childStat.get("isDir", False))
-
-        if not childIsDir:
-            return childUri
-
-    return None
-
-
-def get_log_match_stem(uri: str, sourcesRoot: str) -> str:
-  stem = basename_without_ext(uri).lower()
-  if not stem.startswith("tmp"):
-    return stem
-
-  normalizedUri = uri.rstrip("/")
-  normalizedSourcesRoot = sourcesRoot.rstrip("/") + "/"
-  if normalizedUri.startswith(normalizedSourcesRoot):
-    segments = normalizedUri.split("/")
-    if len(segments) >= 2:
-      parentName = segments[-2]
-      if parentName.endswith(".md"):
-        return parentName[:-3].lower()
-
-  return stem
 
 
 def list_markdown_pages(client: OVFSClient, rootUri: str) -> list[str]:
@@ -308,6 +157,50 @@ def list_markdown_pages(client: OVFSClient, rootUri: str) -> list[str]:
       deduped.append(uri)
 
   return deduped
+
+
+def check_duplicate_index_targets(indexText: str) -> list[str]:
+  seen: set[str] = set()
+  duplicates: list[str] = []
+
+  for relPath in extract_index_link_occurrences(indexText):
+    if relPath in seen:
+      if relPath not in duplicates:
+        duplicates.append(relPath)
+      continue
+    seen.add(relPath)
+
+  return duplicates
+
+
+def check_unindexed_wiki_pages(client: OVFSClient, kbRoot: str, linked_targets: set[str]) -> list[str]:
+  unindexedPages: list[str] = []
+
+  for relPaths in list_indexable_wiki_pages(client, kbRoot).values():
+    for relPath in relPaths:
+      if relPath not in linked_targets:
+        unindexedPages.append(kbRoot + "wiki/" + relPath)
+
+  return unindexedPages
+
+
+def source_log_match_tokens(client: OVFSClient, kbRoot: str, rel_path: str) -> set[str]:
+  tokens = {
+    f"wiki/{rel_path}".lower(),
+    rel_path.lower(),
+    PurePosixPath(rel_path).stem.lower(),
+  }
+  title = read_page_title(client, kbRoot, rel_path, PurePosixPath(rel_path).stem)
+  if title:
+    tokens.add(title.lower())
+  return {token for token in tokens if token}
+
+
+def log_contains_source_token(logText: str, token: str) -> bool:
+  if "/" in token:
+    return token in logText
+
+  return bool(re.search(rf"(?<![0-9a-z\u4e00-\u9fff]){re.escape(token)}(?![0-9a-z\u4e00-\u9fff])", logText))
 
 
 def check_required_structure(client: OVFSClient, kbRoot: str) -> tuple[list[str], list[str]]:
@@ -381,7 +274,6 @@ def check_index_targets(client: OVFSClient, kbRoot: str) -> tuple[list[str], lis
 
 
 def check_source_log_coverage(client: OVFSClient, kbRoot: str) -> list[str]:
-  sourcesRoot = kbRoot + "wiki/sources/"
   logUri = f"{kbRoot}wiki/log.md"
 
   canonicalLogUri = resolve_canonical_markdown_uri(client, logUri)
@@ -389,13 +281,13 @@ def check_source_log_coverage(client: OVFSClient, kbRoot: str) -> list[str]:
     return []
 
   logText = client.read_text(canonicalLogUri).lower()
-  sourcePages = list_markdown_pages(client, sourcesRoot)
+  sourcePages = list_indexable_wiki_pages(client, kbRoot, section_key="sources")["sources"]
 
   missingInLog: list[str] = []
-  for uri in sourcePages:
-    stem = get_log_match_stem(uri, sourcesRoot)
-    if stem not in logText:
-      missingInLog.append(uri)
+  for relPath in sourcePages:
+    if any(log_contains_source_token(logText, token) for token in source_log_match_tokens(client, kbRoot, relPath)):
+      continue
+    missingInLog.append(kbRoot + "wiki/" + relPath)
 
   return missingInLog
 
@@ -439,7 +331,12 @@ def check_nested_resource_dirs(client: OVFSClient, kbRoot: str) -> list[str]:
 def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
   missingDirs, missingFiles = check_required_structure(client, kbRoot)
   emptyKeyPages = check_empty_key_pages(client, kbRoot)
+  canonicalIndexUri = resolve_canonical_markdown_uri(client, kbRoot + "wiki/index.md")
+  indexText = client.read_text(canonicalIndexUri) if canonicalIndexUri else ""
+  indexLinkOccurrences = extract_index_link_occurrences(indexText)
+  duplicateIndexTargets = check_duplicate_index_targets(indexText)
   linkedTargets, brokenIndexTargets = check_index_targets(client, kbRoot)
+  unindexedWikiPages = check_unindexed_wiki_pages(client, kbRoot, set(linkedTargets))
   missingSourceLogEntries = check_source_log_coverage(client, kbRoot)
   nestedDirs = check_nested_resource_dirs(client, kbRoot)
 
@@ -460,8 +357,12 @@ def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
     errors.append(f"关键页面为空或无效：{len(emptyKeyPages)}")
   if brokenIndexTargets:
     errors.append(f"wiki/index.md 引用的内部链接失效：{len(brokenIndexTargets)}")
+  if unindexedWikiPages:
+    errors.append(f"存在未被 wiki/index.md 收录的页面：{len(unindexedWikiPages)}")
   if not allSourcePages:
     warnings.append("wiki/sources/ 下未发现来源页面")
+  if duplicateIndexTargets:
+    warnings.append(f"wiki/index.md 存在重复内部链接目标：{len(duplicateIndexTargets)}")
 
   if not linkedTargets:
     warnings.append("wiki/index.md 中未解析到内部链接")
@@ -487,14 +388,20 @@ def build_report(client: OVFSClient, kbRoot: str) -> dict[str, Any]:
       "concept_pages": len(allConceptPages),
       "synthesis_pages": len(allSynthesisPages),
       "index_links": len(linkedTargets),
+      "index_link_occurrences": len(indexLinkOccurrences),
+      "duplicate_index_targets": len(duplicateIndexTargets),
+      "unindexed_wiki_pages": len(unindexedWikiPages),
     },
     "errors": errors,
     "warnings": warnings,
     "details": {
+      "index_link_occurrences": indexLinkOccurrences,
+      "duplicate_index_targets": duplicateIndexTargets,
       "missing_dirs": missingDirs,
       "missing_files": missingFiles,
       "empty_key_pages": emptyKeyPages,
       "broken_index_targets": brokenIndexTargets,
+      "unindexed_wiki_pages": unindexedWikiPages,
       "missing_source_log_entries": missingSourceLogEntries,
       "nested_resource_dirs": nestedDirs,
     },
@@ -513,6 +420,11 @@ def parse_args() -> argparse.Namespace:
     action="store_true",
     help="Pretty-print JSON output.",
   )
+  parser.add_argument(
+    "--repair-index",
+    action="store_true",
+    help="重建 wiki/index.md，不删除页面，不调用 LLM",
+  )
   parser.add_argument("--config", default=None, help="Path to config JSON")
   parser.add_argument("--profile", default=None, help="Profile name")
   return parser.parse_args()
@@ -527,7 +439,22 @@ def main() -> int:
     config = OVFSConfig.load(config_path=args.config, profile=args.profile)
 
     with OVFSClient(config) as client:
+      repairInfo = None
+      if args.repair_index:
+        indexUri = kbRoot + "wiki/index.md"
+        canonicalIndexUri = resolve_canonical_markdown_uri(client, indexUri)
+        previousIndexText = client.read_text(canonicalIndexUri) if canonicalIndexUri else ""
+        repairedIndexText = rebuild_index_text(client, kbRoot, previousIndexText, touched_entries=None)
+        indexWriteUri, indexShouldCreate = resolve_markdown_write_target_uri(client, indexUri)
+        client.write_text(indexWriteUri, repairedIndexText, create=indexShouldCreate, wait=True)
+        repairInfo = {
+          "index_rebuilt": True,
+          "index_uri": indexUri,
+          "index_write_uri": indexWriteUri,
+        }
       report = build_report(client, kbRoot)
+      if repairInfo:
+        report["repair"] = repairInfo
   except Exception as exc:
     print_json(build_error_result(exc, kb_root=kbRoot), pretty=args.pretty)
     return 1

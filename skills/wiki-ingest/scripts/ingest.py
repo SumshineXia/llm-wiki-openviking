@@ -13,6 +13,7 @@ from openai import OpenAI
 
 from ovfs import OVFSClient, OVFSConfig, OVFSError, OVFSHTTPError
 from dataclasses import dataclass
+from wiki_index import rebuild_index_text
 
 from common import build_error_result, build_kb_root, load_config, print_json
 
@@ -1154,6 +1155,18 @@ def append_log_entry(log_text: str, entry: str) -> str:
     return log_text.rstrip() + "\n" + line + "\n"
 
 
+def build_ingest_log_entry(source_slug: str, source_title: str, log_note: str) -> str:
+    base = (
+        f"已 ingest source: {source_title}; "
+        f"source_slug={source_slug}; "
+        f"source_page=wiki/sources/{source_slug}.md"
+    )
+    normalized_log_note = " ".join(log_note.split())
+    if normalized_log_note:
+        return base + f"; note={normalized_log_note}"
+    return base
+
+
 def write_page(
     client: OVFSClient,
     uri: str,
@@ -1342,17 +1355,22 @@ def main() -> int:
             overview_uri = kb_root + "wiki/overview.md"
             log_uri = kb_root + "wiki/log.md"
 
-            new_index_text = update_index_text(
+            touched_entries = {
+                "sources": {f"sources/{source_slug}.md": source_title},
+                "entities": {f"entities/{page['slug']}.md": page["title"] for page in entity_pages},
+                "concepts": {f"concepts/{page['slug']}.md": page["title"] for page in concept_pages},
+            }
+
+            new_index_text = rebuild_index_text(
+                client,
+                kb_root,
                 context["index_text"],
-                source_slug=source_slug,
-                source_title=source_title,
-                entity_pages=entity_pages,
-                concept_pages=concept_pages,
+                touched_entries=touched_entries,
             )
             new_overview_text = append_overview_note(context["overview_text"], overview_note, source_title)
             new_log_text = append_log_entry(
                 context["log_text"],
-                log_note or f"已将资料 {source_slug} 整理为 wiki/sources/{source_slug}.md",
+                build_ingest_log_entry(source_slug, source_title, log_note),
             )
 
             write_wait_for_indexing = bool(args.wait_for_indexing)
@@ -1432,6 +1450,8 @@ def main() -> int:
                     "max_context_chars": args.max_context_chars,
                     "max_existing_page_names": args.max_existing_page_names,
                 },
+                "index_update_mode": "rebuild",
+                "touched_index_entries": touched_entries,
                 "index_truncated_for_prompt": context["index_truncated_for_prompt"],
                 "overview_truncated_for_prompt": context["overview_truncated_for_prompt"],
                 "existing_entity_page_count": len(context["entity_pages"]),
