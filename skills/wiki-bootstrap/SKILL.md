@@ -28,7 +28,15 @@ description: 当用户要初始化新的远端 OpenViking 知识库（创建 raw
 bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name> --pretty
 ```
 
-可选参数：`--config <path>`、`--profile <name>`。
+默认行为是基础目录和根页面创建请求会尽快返回，不等待 OpenViking 对页面完成语义处理。
+
+显式等待索引完成：
+
+```bash
+bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name> --wait-for-indexing --pretty
+```
+
+可选参数：`--config <path>`、`--profile <name>`、`--wait-for-indexing`。
 
 仅预览（不写入）：
 

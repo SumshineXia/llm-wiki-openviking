@@ -4,7 +4,7 @@ import argparse
 from typing import Any
 
 from common import build_error_result, build_kb_root, print_json, validate_kb_name
-from ovfs import OVFSClient, OVFSConfig, ensure_dir, ensure_text_file
+from ovfs import OVFSClient, OVFSConfig, ensure_dir
 
 
 def plan_bootstrap_paths(kbName: str) -> dict[str, list[str]]:
@@ -48,19 +48,45 @@ def build_initial_file_content(fileUri: str) -> str:
   return ""
 
 
-def apply_bootstrap(plan: dict[str, list[str]], config: OVFSConfig) -> None:
+def ensure_bootstrap_text_file(
+  client: OVFSClient,
+  uri: str,
+  content: str,
+  *,
+  waitForIndexing: bool = False,
+) -> None:
+  if client.exists(uri):
+    return
+  client.write_text(uri, content, create=True, wait=waitForIndexing)
+
+
+def apply_bootstrap(
+  plan: dict[str, list[str]],
+  config: OVFSConfig,
+  waitForIndexing: bool = False,
+) -> None:
   with OVFSClient(config) as client:
     for dirUri in plan["dirs"]:
       ensure_dir(client, dirUri)
 
     for fileUri in plan["files"]:
-      ensure_text_file(client, fileUri, build_initial_file_content(fileUri))
+      ensure_bootstrap_text_file(
+        client,
+        fileUri,
+        build_initial_file_content(fileUri),
+        waitForIndexing=waitForIndexing,
+      )
 
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="初始化远端知识库目录与基础页面")
   parser.add_argument("--kb-name", required=True, help="知识库名称，例如 team-a/project-x/wiki-kb")
   parser.add_argument("--dry-run", action="store_true", help="仅输出计划，不执行创建")
+  parser.add_argument(
+    "--wait-for-indexing",
+    action="store_true",
+    help="等待 OpenViking 在每个基础页面写入后完成语义处理；默认异步返回。",
+  )
   parser.add_argument("--pretty", action="store_true", help="以格式化 JSON 输出")
   parser.add_argument("--config", default=None, help="配置文件路径")
   parser.add_argument("--profile", default=None, help="profile 名称")
@@ -82,7 +108,7 @@ def main() -> int:
       print_json(result, args.pretty)
       return 0
 
-    apply_bootstrap(plan, config)
+    apply_bootstrap(plan, config, waitForIndexing=bool(args.wait_for_indexing))
     result["status"] = "ok"
     print_json(result, args.pretty)
     return 0

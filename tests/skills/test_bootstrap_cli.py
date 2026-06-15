@@ -16,6 +16,8 @@ module = module_from_spec(spec)
 spec.loader.exec_module(module)
 plan_bootstrap_paths = module.plan_bootstrap_paths
 build_initial_file_content = module.build_initial_file_content
+ensure_bootstrap_text_file = module.ensure_bootstrap_text_file
+apply_bootstrap = module.apply_bootstrap
 parse_args = module.parse_args
 
 
@@ -96,3 +98,99 @@ def test_parse_args_supports_config_and_profile(monkeypatch) -> None:
 
   assert args.config == "/tmp/config.json"
   assert args.profile == "p1"
+
+
+def test_ensure_bootstrap_text_file_defaults_to_async_wait_false() -> None:
+  class FakeClient:
+    def __init__(self) -> None:
+      self.write_calls = []
+
+    def exists(self, uri: str) -> bool:
+      return False
+
+    def write_text(self, uri: str, content: str, create: bool = False, wait: bool = True):
+      self.write_calls.append(
+        {
+          "uri": uri,
+          "content": content,
+          "create": create,
+          "wait": wait,
+        }
+      )
+
+  client = FakeClient()
+  uri = "viking://resources/demo/wiki/index.md"
+  content = "# 索引\n\n"
+
+  ensure_bootstrap_text_file(client, uri, content)
+
+  assert client.write_calls == [
+    {
+      "uri": uri,
+      "content": content,
+      "create": True,
+      "wait": False,
+    }
+  ]
+
+
+def test_apply_bootstrap_passes_wait_for_indexing_true_to_page_writes(monkeypatch) -> None:
+  dir_calls = []
+  file_calls = []
+
+  class FakeClient:
+    def __enter__(self):
+      return self
+
+    def __exit__(self, exc_type, exc, tb):
+      return None
+
+  def fake_ovfs_client(config):
+    return FakeClient()
+
+  def fake_ensure_dir(client, uri):
+    dir_calls.append(uri)
+
+  def fake_ensure_bootstrap_text_file(client, uri, content, *, waitForIndexing):
+    file_calls.append(
+      {
+        "uri": uri,
+        "content": content,
+        "waitForIndexing": waitForIndexing,
+      }
+    )
+
+  monkeypatch.setattr(module, "OVFSClient", fake_ovfs_client)
+  monkeypatch.setattr(module, "ensure_dir", fake_ensure_dir)
+  monkeypatch.setattr(module, "ensure_bootstrap_text_file", fake_ensure_bootstrap_text_file)
+
+  plan = {
+    "dirs": ["viking://resources/demo/raw/"],
+    "files": [
+      "viking://resources/demo/wiki/index.md",
+      "viking://resources/demo/wiki/overview.md",
+    ],
+  }
+
+  apply_bootstrap(plan, config=object(), waitForIndexing=True)
+
+  assert dir_calls == ["viking://resources/demo/raw/"]
+  assert [item["uri"] for item in file_calls] == plan["files"]
+  assert all(item["waitForIndexing"] is True for item in file_calls)
+
+
+def test_parse_args_supports_wait_for_indexing(monkeypatch) -> None:
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "bootstrap.py",
+      "--kb-name",
+      "team-a/project-x/wiki-kb",
+      "--wait-for-indexing",
+    ],
+  )
+
+  args = parse_args()
+
+  assert args.wait_for_indexing is True
