@@ -80,6 +80,20 @@ class FakeOVFSClient:
     self.writeCalls.append((uri, content, create))
 
 
+class FakeOVFSClientWithCustomIndex(FakeOVFSClient):
+  def read_text(self, uri: str) -> str:
+    if uri.endswith("wiki/index.md"):
+      return "# 索引\n\n## 自定义说明\n手工备注\n\n## 综合结论\n- [[syntheses/标题.md]] - 旧标题\n"
+    return super().read_text(uri)
+
+
+class FakeOVFSClientWithStaleManagedBullet(FakeOVFSClient):
+  def read_text(self, uri: str) -> str:
+    if uri.endswith("wiki/index.md"):
+      return "# 索引\n\n## 综合结论\n手工备注\n- [[syntheses/old.md]] - Old\n"
+    return super().read_text(uri)
+
+
 def test_legacy_save_updates_index_overview_log_and_returns_deprecated_fields(monkeypatch, capsys) -> None:
   fakeClient = FakeOVFSClient(None)
   monkeypatch.setattr(
@@ -110,8 +124,75 @@ def test_legacy_save_updates_index_overview_log_and_returns_deprecated_fields(mo
   assert output["created"] is True
   assert output["updated"] is False
   assert output["overview_updated"] is True
+  assert output["index_update_mode"] == "rebuild"
 
   writtenUris = [item[0] for item in fakeClient.writeCalls]
   assert "viking://resources/kb/wiki/index.md" in writtenUris
   assert "viking://resources/kb/wiki/overview.md" in writtenUris
   assert "viking://resources/kb/wiki/log.md" in writtenUris
+
+  writtenIndex = next(content for uri, content, _create in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/index.md")
+  assert "## 综合结论" in writtenIndex
+  assert "syntheses/标题.md" in writtenIndex
+  assert "<!-- synthesis:syntheses/标题.md:start -->" not in writtenIndex
+
+
+def test_legacy_save_preserves_non_managed_index_content(monkeypatch, capsys) -> None:
+  fakeClient = FakeOVFSClientWithCustomIndex(None)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    ["query.py", "--kb-name", "kb", "--question", "q", "--save", "--slug", "标题"],
+  )
+  monkeypatch.setattr(queryModule, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(queryModule.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+  monkeypatch.setattr(queryModule, "read_local_schema", lambda: "schema")
+  monkeypatch.setattr(queryModule, "select_relevant_pages", lambda client, kb_root, question, top_k: [{"uri": "u1", "content": "c", "score": "1"}])
+  monkeypatch.setattr(
+    queryModule,
+    "call_llm",
+    lambda prompt, *, api_key, base_url, model: {"answer_markdown": "当前答案", "used_pages": ["u1"], "synthesis_title": "新标题"},
+  )
+  monkeypatch.setattr(queryModule, "resolve_openai_settings", lambda args: {"api_key": "k", "base_url": None, "model": "m"})
+  monkeypatch.setattr(queryModule, "write_temp_json_file", lambda data, pretty: Path("/tmp/payload.json"))
+
+  code = queryModule.main()
+  output = json.loads(capsys.readouterr().out)
+
+  assert code == 0
+  assert output["index_update_mode"] == "rebuild"
+
+  writtenIndex = next(content for uri, content, _create in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/index.md")
+  assert "## 自定义说明" in writtenIndex
+  assert "手工备注" in writtenIndex
+
+
+def test_legacy_save_rebuild_removes_stale_managed_synthesis_bullet(monkeypatch, capsys) -> None:
+  fakeClient = FakeOVFSClientWithStaleManagedBullet(None)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    ["query.py", "--kb-name", "kb", "--question", "q", "--save", "--slug", "标题"],
+  )
+  monkeypatch.setattr(queryModule, "OVFSClient", lambda _config: fakeClient)
+  monkeypatch.setattr(queryModule.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+  monkeypatch.setattr(queryModule, "read_local_schema", lambda: "schema")
+  monkeypatch.setattr(queryModule, "select_relevant_pages", lambda client, kb_root, question, top_k: [{"uri": "u1", "content": "c", "score": "1"}])
+  monkeypatch.setattr(
+    queryModule,
+    "call_llm",
+    lambda prompt, *, api_key, base_url, model: {"answer_markdown": "当前答案", "used_pages": ["u1"], "synthesis_title": "新标题"},
+  )
+  monkeypatch.setattr(queryModule, "resolve_openai_settings", lambda args: {"api_key": "k", "base_url": None, "model": "m"})
+  monkeypatch.setattr(queryModule, "write_temp_json_file", lambda data, pretty: Path("/tmp/payload.json"))
+
+  code = queryModule.main()
+  output = json.loads(capsys.readouterr().out)
+
+  assert code == 0
+  assert output["index_update_mode"] == "rebuild"
+
+  writtenIndex = next(content for uri, content, _create in fakeClient.writeCalls if uri == "viking://resources/kb/wiki/index.md")
+  assert "手工备注" in writtenIndex
+  assert "- [[syntheses/标题.md]] - 新标题" in writtenIndex
+  assert "- [[syntheses/old.md]] - Old" not in writtenIndex

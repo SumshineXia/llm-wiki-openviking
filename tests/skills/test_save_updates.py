@@ -173,3 +173,123 @@ def test_overview_should_write_synthesis_block(monkeypatch, tmp_path: Path, caps
   assert code == 0
   assert output["status"] == "ok"
   assert "viking://resources/kb/wiki/overview.md" in fakeClient.writeCalls
+
+
+def test_save_rebuilds_index_and_preserves_manual_sections(monkeypatch, tmp_path: Path, capsys) -> None:
+  answerPath = tmp_path / "answer.md"
+  answerPath.write_text("答案", encoding="utf-8")
+  createdClients = []
+
+  class FakeClient:
+    def __init__(self, _config) -> None:
+      self.writeCalls: list[tuple[str, str, bool, bool]] = []
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, excType, exc, tb) -> None:
+      return None
+
+    def stat(self, uri: str):
+      if uri.endswith("wiki/syntheses/t.md"):
+        raise module.OVFSHTTPError("404")
+      if uri.endswith("wiki/index.md"):
+        return {"isDir": True}
+      return {"isDir": False}
+
+    def ls(self, uri: str, recursive: bool = False):
+      if uri.endswith("wiki/index.md/"):
+        return []
+      return []
+
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("index.md"):
+        return "# 索引\n\n## 资料来源\n- [[sources/old.md]] - Old\n\n## 自定义说明\n手工备注\n"
+      if uri.endswith("overview.md"):
+        return "# 概览\n"
+      return "# 操作日志\n"
+
+    def write_text(self, uri: str, content: str, create: bool, wait: bool) -> None:
+      self.writeCalls.append((uri, content, create, wait))
+
+  def makeClient(config):
+    client = FakeClient(config)
+    createdClients.append(client)
+    return client
+
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    ["save.py", "--kb-name", "kb", "--answer-file", str(answerPath), "--question", "q", "--title", "t"],
+  )
+  monkeypatch.setattr(module, "OVFSClient", makeClient)
+  monkeypatch.setattr(module.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+
+  code = module.main()
+  output = json.loads(capsys.readouterr().out)
+  fakeClient = createdClients[0]
+  writtenIndex = next(
+    content for uri, content, _create, _wait in fakeClient.writeCalls if uri.endswith("wiki/index.md/index.md")
+  )
+  indexWriteCall = next(
+    (uri, content, create, wait) for uri, content, create, wait in fakeClient.writeCalls if uri.endswith("wiki/index.md/index.md")
+  )
+
+  assert code == 0
+  assert output["index_update_mode"] == "rebuild"
+  assert output["touched_index_entries"]["syntheses"] == {"syntheses/t.md": "t"}
+  assert any(uri.endswith("wiki/index.md/index.md") for uri, _content, _create, _wait in fakeClient.writeCalls)
+  assert "- [[syntheses/t.md]] - t" in writtenIndex
+  assert "## 自定义说明" in writtenIndex
+  assert "手工备注" in writtenIndex
+  assert indexWriteCall[2] is False
+
+
+def test_save_fails_when_index_bundle_listing_returns_non_not_found_error(monkeypatch, tmp_path: Path, capsys) -> None:
+  answerPath = tmp_path / "answer.md"
+  answerPath.write_text("答案", encoding="utf-8")
+
+  class FakeClient:
+    def __init__(self, _config) -> None:
+      self.writeCalls = []
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, excType, exc, tb) -> None:
+      return None
+
+    def stat(self, uri: str):
+      if uri.endswith("wiki/syntheses/t.md"):
+        raise module.OVFSHTTPError("404")
+      if uri.endswith("wiki/index.md"):
+        return {"isDir": True}
+      return {"isDir": False}
+
+    def ls(self, uri: str, recursive: bool = False):
+      if uri.endswith("wiki/index.md/") and recursive is False:
+        raise module.OVFSHTTPError("500 temporary failure")
+      return []
+
+    def read_text(self, uri: str) -> str:
+      if uri.endswith("overview.md"):
+        return "# 概览\n"
+      return "# 操作日志\n"
+
+    def write_text(self, uri: str, content: str, create: bool, wait: bool) -> None:
+      self.writeCalls.append((uri, content, create, wait))
+
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    ["save.py", "--kb-name", "kb", "--answer-file", str(answerPath), "--question", "q", "--title", "t"],
+  )
+  monkeypatch.setattr(module, "OVFSClient", FakeClient)
+  monkeypatch.setattr(module.OVFSConfig, "load", lambda config_path=None, profile=None: object())
+
+  code = module.main()
+  output = json.loads(capsys.readouterr().out)
+
+  assert code == 1
+  assert output["error_type"] == "OVFSHTTPError"
+  assert "500 temporary failure" in output["error"]

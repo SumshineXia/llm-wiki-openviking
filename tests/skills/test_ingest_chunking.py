@@ -440,3 +440,121 @@ def test_main_wait_for_indexing_writes_with_wait_true_and_outputs_sync_mode(
   assert result["semantic_indexing_mode"] == "sync"
   assert len(client.write_text_calls) > 0
   assert all(call["wait"] is True for call in client.write_text_calls)
+
+
+def test_main_rebuilds_index_and_returns_touched_entries(
+  monkeypatch: pytest.MonkeyPatch,
+  capsys: pytest.CaptureFixture[str],
+) -> None:
+  class FakeClient:
+    def __init__(self) -> None:
+      self.writeCalls: list[dict[str, Any]] = []
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, exc_type, exc, tb):
+      return None
+
+    def stat(self, uri: str):
+      if uri == "viking://resources/demo/wiki/index.md":
+        return {"isDir": False}
+      if uri == "viking://resources/demo/wiki/overview.md":
+        return {"isDir": False}
+      if uri == "viking://resources/demo/wiki/log.md":
+        return {"isDir": False}
+      if uri == "viking://resources/demo/wiki/sources/source.md":
+        raise module.OVFSHTTPError("404 not found")
+      if uri.endswith("/"):
+        return {"isDir": True}
+      raise module.OVFSHTTPError("404 not found")
+
+    def read_text(self, uri: str) -> str:
+      if uri == "viking://resources/demo/wiki/index.md":
+        return "# 索引\n\n## 资料来源\n"
+      if uri == "viking://resources/demo/wiki/overview.md":
+        return "# 概览\n"
+      if uri == "viking://resources/demo/wiki/log.md":
+        return "# 操作日志\n"
+      raise AssertionError(f"unexpected read_text uri: {uri}")
+
+    def ls(self, uri: str, recursive: bool = False):
+      if uri in {
+        "viking://resources/demo/wiki/entities/",
+        "viking://resources/demo/wiki/concepts/",
+        "viking://resources/demo/wiki/sources/",
+      }:
+        return []
+      return []
+
+    def write_text(self, uri: str, markdown: str, create: bool, wait: bool) -> None:
+      self.writeCalls.append(
+        {
+          "uri": uri,
+          "markdown": markdown,
+          "create": create,
+          "wait": wait,
+        }
+      )
+
+  client = FakeClient()
+
+  class DummyConfig:
+    @staticmethod
+    def load(config_path=None, profile=None):
+      return object()
+
+  monkeypatch.setattr(module, "OVFSClient", lambda config: client)
+  monkeypatch.setattr(module, "OVFSConfig", DummyConfig)
+  monkeypatch.setattr(module, "read_local_schema", lambda: "# schema")
+  monkeypatch.setattr(
+    module,
+    "resolve_openai_settings",
+    lambda args: {"api_key": "k", "base_url": None, "model": "m"},
+  )
+  monkeypatch.setattr(
+    module,
+    "resolve_ingest_source_bundle",
+    lambda clientArg, sourceUri: module.IngestSourceBundle(
+      root_uri=sourceUri,
+      markdown_uris=[sourceUri],
+      ignored_metadata_uris=[],
+      source_kind="file",
+    ),
+  )
+  monkeypatch.setattr(module, "read_source_bundle_text", lambda clientArg, bundle: "# source\n\ntext")
+  monkeypatch.setattr(
+    module,
+    "call_llm",
+    lambda prompt, *, api_key, base_url, model: {
+      "source_title": "来源标题",
+      "source_page_markdown": "# 来源标题\n\n正文",
+      "entity_pages": [],
+      "concept_pages": [],
+      "overview_note": "overview note",
+      "log_note": "custom log\n  note",
+    },
+  )
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "ingest.py",
+      "--kb-name",
+      "demo",
+      "--source-uri",
+      "viking://resources/demo/raw/source.md",
+    ],
+  )
+
+  exit_code = module.main()
+  output = json.loads(capsys.readouterr().out)
+  indexWrite = next(call for call in client.writeCalls if call["uri"] == "viking://resources/demo/wiki/index.md")
+  logWrite = next(call for call in client.writeCalls if call["uri"] == "viking://resources/demo/wiki/log.md")
+
+  assert exit_code == 0
+  assert output["index_update_mode"] == "rebuild"
+  assert output["touched_index_entries"]["sources"] == {"sources/source.md": "来源标题"}
+  assert "- [[sources/source.md]] - 来源标题" in indexWrite["markdown"]
+  assert "; note=custom log note" in logWrite["markdown"]
+  assert "custom log\n" not in logWrite["markdown"]

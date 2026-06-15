@@ -97,6 +97,44 @@ def test_update_index_text_reuses_existing_legacy_headings_for_all_sections() ->
   assert "## 综合结论" not in updated
 
 
+def test_rebuild_index_text_preserves_legacy_english_headings() -> None:
+  helperPath = repoRoot / "skills" / "wiki-ingest" / "scripts" / "wiki_index.py"
+  helperSpec = spec_from_file_location("wiki_index_helper_for_zh", helperPath)
+  if helperSpec is None or helperSpec.loader is None:
+    raise RuntimeError("无法加载 skills/wiki-ingest/scripts/wiki_index.py")
+
+  helper = module_from_spec(helperSpec)
+  sys.modules[helperSpec.name] = helper
+  helperSpec.loader.exec_module(helper)
+
+  class FakeClient:
+    def stat(self, uri: str) -> dict[str, bool]:
+      del uri
+      raise RuntimeError("404")
+
+    def ls(self, uri: str, recursive: bool = False) -> list[str]:
+      del uri, recursive
+      return []
+
+    def read_text(self, uri: str) -> str:
+      del uri
+      return ""
+
+  rebuilt = helper.rebuild_index_text(
+    FakeClient(),
+    "viking://resources/demo/",
+    "# Index\n\n- [Overview](./overview.md)\n\n## Sources\n\n## Entities\n\n## Concepts\n\n## Syntheses\n",
+    touched_entries=None,
+  )
+
+  assert rebuilt.startswith("# Index")
+  assert "## Sources" in rebuilt
+  assert "## Entities" in rebuilt
+  assert "## Concepts" in rebuilt
+  assert "## Syntheses" in rebuilt
+  assert "## 资料来源" not in rebuilt
+
+
 def test_append_unique_bullet_reuses_english_syntheses_section() -> None:
   indexText = "# Index\n\n## Syntheses\n"
   bullet = "- [[syntheses/a.md]] - answer"
