@@ -22,21 +22,25 @@ description: 当用户要求基于远端 KB wiki 进行自然语言问答（并�
 
 ## 执行方式
 
-必须使用本 skill 自带脚本（可在任意目录执行）：
+必须使用本 skill 自带脚本。不要写死 skills 的安装根目录。
+
+执行时，先将当前 skill 根目录记为 `<THIS_SKILL_DIR>`，也就是当前 `SKILL.md` 所在目录；然后调用：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-query/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --question "<your question>" \
   --pretty
 ```
+
+不要把 `<THIS_SKILL_DIR>` 替换成仓库路径，也不要替换成任何固定的 skills 安装目录。
 
 可选参数：`--config <path>`、`--profile <name>`。
 
 兼容模式（legacy，仅兼容保留，不建议交互式场景使用）：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-query/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --question "<your question>" \
   --save \
@@ -48,7 +52,7 @@ bash ~/.config/opencode/skills/wiki-query/scripts/run.sh \
 
 - 每次成功返回问答结果后，默认追加一句：`是否保存为 synthesis？`
 - `wiki-query` 成功输出会包含：`save_payload`、`save_payload_path`、`recommended_save_skill=wiki-save`
-- 若用户同意保存，必须调用：`bash ~/.config/opencode/skills/wiki-save/scripts/run.sh --payload-file <save_payload_path>`
+- 若用户同意保存，必须调用同级 `wiki-save` skill 的脚本。前提是 `wiki-query` 与 `wiki-save` 已作为 llm-wiki skills 同批安装在同一个 skills 父目录下。先将当前 `wiki-query` skill 根目录记为 `<THIS_SKILL_DIR>`，再调用：`bash "<THIS_SKILL_DIR>/../wiki-save/scripts/run.sh" --payload-file <save_payload_path> --pretty`
 - 不要在交互式“保存刚才答案”场景调用 `wiki-query --save`
 - `wiki-query --save` 会重新检索并再次调用 LLM，不是“保存刚才答案”的无损复用路径
 

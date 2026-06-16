@@ -21,16 +21,22 @@ description: 当用户要求把已有答案保存为远端 KB 的 synthesis（�
 
 ## 执行方式
 
+必须使用本 skill 自带脚本。不要写死 skills 的安装根目录。
+
+执行时，先将当前 skill 根目录记为 `<THIS_SKILL_DIR>`，也就是当前 `SKILL.md` 所在目录；然后调用：
+
 ```bash
-bash ~/.config/opencode/skills/wiki-save/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --payload-file <payload.json> \
   --pretty
 ```
 
+不要把 `<THIS_SKILL_DIR>` 替换成仓库路径，也不要替换成任何固定的 skills 安装目录。
+
 或使用显式参数模式：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-save/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --answer-file <answer.md> \
   --question "<question>" \
