@@ -22,14 +22,18 @@ description: 当用户要求把远端 raw source ingest 成 wiki 页面（并更
 
 ## 执行方式
 
-必须使用本 skill 自带脚本（可在任意目录执行）：
+必须使用本 skill 自带脚本。不要写死 skills 的安装根目录。
+
+执行时，先将当前 skill 根目录记为 `<THIS_SKILL_DIR>`，也就是当前 `SKILL.md` 所在目录；然后调用：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --source-uri <full-raw-source-uri> \
   --pretty
 ```
+
+不要把 `<THIS_SKILL_DIR>` 替换成仓库路径，也不要替换成任何固定的 skills 安装目录。
 
 可选参数：`--config <path>`、`--profile <name>`、`--max-context-chars <int>`、`--max-existing-page-names <int>`、`--long-doc-threshold <int>`、`--chunk-size <int>`、`--chunk-overlap <int>`、`--max-chunks <int>`、`--allow-partial-chunks`。
 
@@ -52,7 +56,7 @@ bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
 仅预览（不写入）：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --source-uri <full-raw-source-uri> \
   --dry-run \

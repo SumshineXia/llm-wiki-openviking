@@ -22,18 +22,22 @@ description: 当用户要初始化新的远端 OpenViking 知识库（创建 raw
 
 ## 执行方式
 
-必须使用本 skill 自带脚本（可在任意目录执行）：
+必须使用本 skill 自带脚本。不要写死 skills 的安装根目录。
+
+执行时，先将当前 skill 根目录记为 `<THIS_SKILL_DIR>`，也就是当前 `SKILL.md` 所在目录；然后调用：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name> --pretty
+bash "<THIS_SKILL_DIR>/scripts/run.sh" --kb-name <kb-name> --pretty
 ```
+
+不要把 `<THIS_SKILL_DIR>` 替换成仓库路径，也不要替换成任何固定的 skills 安装目录。
 
 默认行为是基础目录和根页面创建请求会尽快返回，不等待 OpenViking 对页面完成语义处理。
 
 显式等待索引完成：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name> --wait-for-indexing --pretty
+bash "<THIS_SKILL_DIR>/scripts/run.sh" --kb-name <kb-name> --wait-for-indexing --pretty
 ```
 
 可选参数：`--config <path>`、`--profile <name>`、`--wait-for-indexing`。
@@ -41,7 +45,7 @@ bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name>
 仅预览（不写入）：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-bootstrap/scripts/run.sh --kb-name <kb-name> --dry-run --pretty
+bash "<THIS_SKILL_DIR>/scripts/run.sh" --kb-name <kb-name> --dry-run --pretty
 ```
 
 ## 强约束

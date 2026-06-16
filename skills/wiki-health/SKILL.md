@@ -23,18 +23,22 @@ description: 当用户要求对 KB 执行 wiki-health（检查远端 wiki 结构
 
 ## 执行方式
 
-必须使用本 skill 自带脚本（可在任意目录执行）：
+必须使用本 skill 自带脚本。不要写死 skills 的安装根目录。
+
+执行时，先将当前 skill 根目录记为 `<THIS_SKILL_DIR>`，也就是当前 `SKILL.md` 所在目录；然后调用：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name <kb-name> --pretty
+bash "<THIS_SKILL_DIR>/scripts/run.sh" --kb-name <kb-name> --pretty
 ```
+
+不要把 `<THIS_SKILL_DIR>` 替换成仓库路径，也不要替换成任何固定的 skills 安装目录。
 
 可选参数：`--config <path>`、`--profile <name>`。
 
 当用户明确要求“修复 index / 重建 index / repair index”时，可运行：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-health/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --profile <profile> \
   --repair-index \
