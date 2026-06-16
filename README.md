@@ -23,17 +23,27 @@
 
 ### 1) 安装 skills 到 OpenCode
 
-把本仓库的 `skills/` 子目录复制到本机 `~/.config/opencode/skills/`（目录名保持不变）：
+把本仓库的 `skills/wiki-*` 目录复制到你的 OpenCode 实际加载 skills 的目录中。该目录可能是默认目录，也可能是你自定义的目录；llm-wiki 不依赖固定安装路径，只要求每个 skill 内部保持如下相对结构：
 
-- `skills/wiki-bootstrap` -> `~/.config/opencode/skills/wiki-bootstrap`
-- `skills/wiki-health` -> `~/.config/opencode/skills/wiki-health`
-- `skills/wiki-ingest` -> `~/.config/opencode/skills/wiki-ingest`
-- `skills/wiki-query` -> `~/.config/opencode/skills/wiki-query`
-- `skills/wiki-upload-source` -> `~/.config/opencode/skills/wiki-upload-source`
-- `skills/wiki-save` -> `~/.config/opencode/skills/wiki-save`
-- `skills/wiki-lint` -> `~/.config/opencode/skills/wiki-lint`
-- `skills/wiki-graph` -> `~/.config/opencode/skills/wiki-graph`
-- `skills/wiki-profile` -> `~/.config/opencode/skills/wiki-profile`
+```text
+wiki-xxx/
+  SKILL.md
+  scripts/
+    run.sh
+    xxx.py
+```
+
+建议同批安装以下 skills，尤其是 `wiki-query` 与 `wiki-save` 需要位于同一个 skills 父目录下，才能通过相对路径完成"query -> 确认 -> wiki-save"流程：
+
+- `skills/wiki-bootstrap`
+- `skills/wiki-health`
+- `skills/wiki-ingest`
+- `skills/wiki-query`
+- `skills/wiki-upload-source`
+- `skills/wiki-save`
+- `skills/wiki-lint`
+- `skills/wiki-graph`
+- `skills/wiki-profile`
 
 如果你只想用部分能力，也可以只复制对应 skill。
 
@@ -73,9 +83,11 @@
 多 profile 用户可使用：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh list --pretty
-bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh use <profile>
-bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
+export OPENCODE_SKILLS_DIR="<你的 OpenCode skills 目录>"
+
+bash "$OPENCODE_SKILLS_DIR/wiki-profile/scripts/run.sh" list --pretty
+bash "$OPENCODE_SKILLS_DIR/wiki-profile/scripts/run.sh" use <profile>
+bash "$OPENCODE_SKILLS_DIR/wiki-profile/scripts/run.sh" current --pretty
 ```
 
 ---
@@ -147,7 +159,7 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
 
 ### Q1：必须在本仓库目录里运行吗？
 
-不用。只要 `~/.config/opencode/skills` 和 `~/.config/llm-wiki-openviking/config.json` 配置正确，就可以在任意目录用 OpenCode。
+不用。只要 llm-wiki skills 已安装到 OpenCode 实际加载的 skills 目录中，并且 `~/.config/llm-wiki-openviking/config.json` 配置正确，就可以在任意目录用 OpenCode。
 
 ### Q2：必须先 clone 本项目吗？
 
@@ -177,7 +189,8 @@ bash ~/.config/opencode/skills/wiki-profile/scripts/run.sh current --pretty
 
 ```bash
 cd /tmp
-bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name team-a/project-x --pretty
+export OPENCODE_SKILLS_DIR="<你的 OpenCode skills 目录>"
+bash "$OPENCODE_SKILLS_DIR/wiki-health/scripts/run.sh" --kb-name team-a/project-x --pretty
 ```
 
 ---
@@ -189,12 +202,14 @@ bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name team-a/proje
 示例（按你的实际路径替换）：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-health/scripts/run.sh --kb-name my-kb
-bash ~/.config/opencode/skills/wiki-ingest/scripts/run.sh --kb-name my-kb --source-uri raw/demo.md
-bash ~/.config/opencode/skills/wiki-query/scripts/run.sh --kb-name my-kb --question "解释这个知识库的核心主题"
-bash ~/.config/opencode/skills/wiki-save/scripts/run.sh --payload-file /tmp/wiki-query-save.json
-bash ~/.config/opencode/skills/wiki-lint/scripts/run.sh --kb-name my-kb
-bash ~/.config/opencode/skills/wiki-graph/scripts/run.sh --kb-name my-kb
+export OPENCODE_SKILLS_DIR="<你的 OpenCode skills 目录>"
+
+bash "$OPENCODE_SKILLS_DIR/wiki-health/scripts/run.sh" --kb-name my-kb
+bash "$OPENCODE_SKILLS_DIR/wiki-ingest/scripts/run.sh" --kb-name my-kb --source-uri raw/demo.md
+bash "$OPENCODE_SKILLS_DIR/wiki-query/scripts/run.sh" --kb-name my-kb --question "解释这个知识库的核心主题"
+bash "$OPENCODE_SKILLS_DIR/wiki-save/scripts/run.sh" --payload-file /tmp/wiki-query-save.json
+bash "$OPENCODE_SKILLS_DIR/wiki-lint/scripts/run.sh" --kb-name my-kb
+bash "$OPENCODE_SKILLS_DIR/wiki-graph/scripts/run.sh" --kb-name my-kb
 ```
 
 如果 `scripts/run.sh` 报错，优先检查：
