@@ -26,8 +26,23 @@ def test_skill_docs_do_not_use_skills_relative_path_command():
     assert "./skills/" not in content
 
 
-def test_skill_docs_reference_global_skill_install_path():
+def test_skill_docs_do_not_reference_fixed_opencode_skill_install_path():
   for skill_name in get_skill_names():
     skill_doc_path = Path("skills") / skill_name / "SKILL.md"
     content = skill_doc_path.read_text(encoding="utf-8")
-    assert "~/.config/opencode/skills/" in content
+    assert "~/.config/opencode/skills/" not in content
+    assert "$HOME/.config/opencode/skills/" not in content
+
+
+def test_skill_docs_reference_current_skill_dir_placeholder():
+  for skill_name in get_skill_names():
+    skill_doc_path = Path("skills") / skill_name / "SKILL.md"
+    content = skill_doc_path.read_text(encoding="utf-8")
+    assert "<THIS_SKILL_DIR>" in content
+    assert 'bash "<THIS_SKILL_DIR>/scripts/run.sh"' in content
+
+
+def test_query_doc_references_sibling_wiki_save_without_fixed_root():
+  content = (Path("skills") / "wiki-query" / "SKILL.md").read_text(encoding="utf-8")
+  assert '../wiki-save/scripts/run.sh' in content
+  assert "~/.config/opencode/skills/wiki-save" not in content
