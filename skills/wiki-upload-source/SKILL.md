@@ -22,15 +22,19 @@ description: 当用户要求把本地文件上传到某个 KB 的 raw/ 路径时
 
 ## 执行方式
 
-必须使用本 skill 自带脚本（可在任意目录执行）：
+必须使用本 skill 自带脚本。不要写死 skills 的安装根目录。
+
+执行时，先将当前 skill 根目录记为 `<THIS_SKILL_DIR>`，也就是当前 `SKILL.md` 所在目录；然后调用：
 
 ```bash
-bash ~/.config/opencode/skills/wiki-upload-source/scripts/run.sh \
+bash "<THIS_SKILL_DIR>/scripts/run.sh" \
   --kb-name <kb-name> \
   --file <local-file-path> \
   --to raw/<target-file-name>.md \
   --pretty
 ```
+
+不要把 `<THIS_SKILL_DIR>` 替换成仓库路径，也不要替换成任何固定的 skills 安装目录。
 
 可选参数：`--config <path>`、`--profile <name>`。
 
