@@ -151,3 +151,114 @@ def test_client_sets_auth_headers() -> None:
         assert client.session.headers.get("X-OpenViking-User") == "header-user"
     finally:
         client.close()
+
+
+def test_ovfs_config_load_rejects_deprecated_flat_default_kb_name(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "openviking_url": "http://file-host:1933",
+                "default_kb_name": "old-default"
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 default_kb_name"):
+        OVFSConfig.load(config_path=str(config_path))
+
+
+def test_ovfs_config_load_rejects_deprecated_flat_system_id(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "openviking_url": "http://file-host:1933",
+                "system_id": "old-system"
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 system_id"):
+        OVFSConfig.load(config_path=str(config_path))
+
+
+def test_ovfs_config_load_rejects_deprecated_flat_defaults(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "openviking_url": "http://file-host:1933",
+                "defaults": {
+                    "kb_name": "old-default"
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 defaults"):
+        OVFSConfig.load(config_path=str(config_path))
+
+
+def test_ovfs_config_load_rejects_deprecated_v2_system_id(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "profile": "dev",
+                        "system": {
+                            "id": "old-system",
+                            "name": "Dev System"
+                        },
+                        "openviking": {
+                            "url": "http://dev:1933"
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 id"):
+        OVFSConfig.load(config_path=str(config_path), profile="dev")
+
+
+def test_ovfs_config_load_rejects_deprecated_v2_defaults(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "profile": "dev",
+                        "system": {
+                            "name": "Dev System"
+                        },
+                        "openviking": {
+                            "url": "http://dev:1933"
+                        },
+                        "defaults": {
+                            "kb_name": "old-default"
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 defaults"):
+        OVFSConfig.load(config_path=str(config_path), profile="dev")

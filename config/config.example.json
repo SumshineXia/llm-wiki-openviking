@@ -4,7 +4,6 @@
     {
       "profile": "default",
       "system": {
-        "id": "system-demo",
         "name": "演示系统",
         "ipmp_system_num": "IPMP-DEMO"
       },
@@ -19,9 +18,6 @@
         "base_url": "http://company-llm-gateway/v1",
         "api_key": "",
         "model": "company-default-model"
-      },
-      "defaults": {
-        "kb_name": "demo-kb"
       }
     }
   ]

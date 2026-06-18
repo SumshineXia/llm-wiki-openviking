@@ -80,7 +80,7 @@ def apply_bootstrap(
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="初始化远端知识库目录与基础页面")
-  parser.add_argument("--kb-name", required=True, help="知识库名称，例如 team-a/project-x/wiki-kb")
+  parser.add_argument("--kb-name", required=True, help="知识库名称，例如 team-a/project-x/kb-main")
   parser.add_argument("--dry-run", action="store_true", help="仅输出计划，不执行创建")
   parser.add_argument(
     "--wait-for-indexing",

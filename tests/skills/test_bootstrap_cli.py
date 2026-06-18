@@ -22,31 +22,42 @@ parse_args = module.parse_args
 
 
 def test_plan_bootstrap_paths_contains_required_dirs_and_files() -> None:
-  plan = plan_bootstrap_paths("team-a/project-x/wiki-kb")
+  plan = plan_bootstrap_paths("team-a/project-x/kb-main")
 
   assert "dirs" in plan
   assert "files" in plan
 
-  assert "viking://resources/team-a/project-x/wiki-kb/raw/" in plan["dirs"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/" in plan["dirs"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/sources/" in plan["dirs"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/entities/" in plan["dirs"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/concepts/" in plan["dirs"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/syntheses/" in plan["dirs"]
-  assert "viking://resources/team-a/project-x/wiki-kb/graph/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/raw/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/sources/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/entities/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/concepts/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/syntheses/" in plan["dirs"]
+  assert "viking://resources/team-a/project-x/kb-main/graph/" in plan["dirs"]
 
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/index.md" in plan["files"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/overview.md" in plan["files"]
-  assert "viking://resources/team-a/project-x/wiki-kb/wiki/log.md" in plan["files"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/index.md" in plan["files"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/overview.md" in plan["files"]
+  assert "viking://resources/team-a/project-x/kb-main/wiki/log.md" in plan["files"]
 
 
-def test_bootstrap_cli_dry_run_outputs_required_structure() -> None:
+def test_bootstrap_cli_dry_run_outputs_required_structure(tmp_path: Path) -> None:
+  config_path = tmp_path / "config.json"
+  config_path.write_text(
+    json.dumps({
+      "openviking_url": "http://localhost:1933",
+      "openviking_api_key": "dry-run-key",
+    }),
+    encoding="utf-8",
+  )
+
   process = subprocess.run(
     [
       "python3",
       str(module_path),
       "--kb-name",
-      "team-a/project-x/wiki-kb",
+      "team-a/project-x/kb-main",
+      "--config",
+      str(config_path),
       "--dry-run",
     ],
     check=True,
@@ -63,7 +74,7 @@ def test_bootstrap_cli_dry_run_outputs_required_structure() -> None:
 
 
 def test_build_initial_file_content_uses_chinese_root_templates() -> None:
-  kb_root = "viking://resources/team-a/project-x/wiki-kb/"
+  kb_root = "viking://resources/team-a/project-x/kb-main/"
 
   index_content = build_initial_file_content(f"{kb_root}wiki/index.md")
   overview_content = build_initial_file_content(f"{kb_root}wiki/overview.md")
@@ -86,7 +97,7 @@ def test_parse_args_supports_config_and_profile(monkeypatch) -> None:
     [
       "bootstrap.py",
       "--kb-name",
-      "team-a/project-x/wiki-kb",
+      "team-a/project-x/kb-main",
       "--config",
       "/tmp/config.json",
       "--profile",
@@ -186,7 +197,7 @@ def test_parse_args_supports_wait_for_indexing(monkeypatch) -> None:
     [
       "bootstrap.py",
       "--kb-name",
-      "team-a/project-x/wiki-kb",
+      "team-a/project-x/kb-main",
       "--wait-for-indexing",
     ],
   )

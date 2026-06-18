@@ -21,4 +21,4 @@ def test_validate_kb_name_rejects_invalid_inputs(bad_name: str) -> None:
 
 
 def test_validate_kb_name_accepts_team_project_kb() -> None:
-  assert validate_kb_name("team-a/project-x/wiki-kb") == "team-a/project-x/wiki-kb"
+  assert validate_kb_name("team-a/project-x/kb-main") == "team-a/project-x/kb-main"

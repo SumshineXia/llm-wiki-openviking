@@ -122,6 +122,52 @@ def mask_secret(value: str) -> str:
     return f"{value[:4]}{'*' * (len(value) - 8)}{value[-4:]}"
 
 
+def validate_config_schema(raw: dict[str, Any], config_path: Path) -> None:
+    if "default_kb_name" in raw:
+        raise ConfigError(
+            f"flat config 包含已废弃字段 default_kb_name；"
+            f"默认知识库配置已不再支持，请显式传入 --kb-name，并从 AIHub 重新下载最新 llm-wiki 配置；"
+            f"config={config_path}"
+        )
+
+    if "system_id" in raw:
+        raise ConfigError(
+            f"flat config 包含已废弃字段 system_id；"
+            f"system.id 已不再支持，请从 AIHub 重新下载最新 llm-wiki 配置；"
+            f"config={config_path}"
+        )
+
+    if "defaults" in raw:
+        raise ConfigError(
+            f"flat config 包含已废弃字段 defaults；"
+            f"defaults.kb_name 已不再支持，请从 AIHub 重新下载最新 llm-wiki 配置；"
+            f"config={config_path}"
+        )
+
+    profiles = raw.get("profiles")
+    if raw.get("version") == 2 and isinstance(profiles, list):
+        for index, item in enumerate(profiles):
+            if not isinstance(item, dict):
+                continue
+
+            profile_name = str(item.get("profile", f"#{index}")).strip() or f"#{index}"
+
+            if "defaults" in item:
+                raise ConfigError(
+                    f"profile {profile_name} 包含已废弃字段 defaults；"
+                    f"defaults.kb_name 已不再支持，请显式传入 --kb-name，并从 AIHub 重新下载最新 llm-wiki 配置；"
+                    f"config={config_path}"
+                )
+
+            system = item.get("system")
+            if isinstance(system, dict) and "id" in system:
+                raise ConfigError(
+                    f"profile {profile_name}.system 包含已废弃字段 id；"
+                    f"system.id 已不再支持，请从 AIHub 重新下载最新 llm-wiki 配置；"
+                    f"config={config_path}"
+                )
+
+
 def load_raw_config(config_path: str | None = None) -> tuple[dict[str, Any], Path]:
     selected_path = resolve_config_path(config_path)
     if not selected_path.exists():
@@ -135,6 +181,7 @@ def load_raw_config(config_path: str | None = None) -> tuple[dict[str, Any], Pat
         raise ConfigError(f"配置文件 JSON 非法: {selected_path}; {exc}") from exc
     if not isinstance(raw_data, dict):
         raise ConfigError(f"配置文件必须是 JSON 对象: {selected_path}")
+    validate_config_schema(raw_data, selected_path)
     return raw_data, selected_path
 
 
@@ -198,7 +245,6 @@ def _to_flat_config(
     system = selected_profile.get("system") if isinstance(selected_profile.get("system"), dict) else {}
     openviking = selected_profile.get("openviking") if isinstance(selected_profile.get("openviking"), dict) else {}
     openai = selected_profile.get("openai") if isinstance(selected_profile.get("openai"), dict) else {}
-    defaults = selected_profile.get("defaults") if isinstance(selected_profile.get("defaults"), dict) else {}
 
     openviking_url = str(openviking.get("url") or "").strip()
     if not openviking_url:
@@ -210,7 +256,6 @@ def _to_flat_config(
         "profile": selected_profile_name,
         "profile_source": profile_source,
         "config_path": str(config_path),
-        "system_id": system.get("id", ""),
         "system_name": system.get("name", ""),
         "ipmp_system_num": system.get("ipmp_system_num", ""),
         "openviking_url": openviking_url,
@@ -221,7 +266,6 @@ def _to_flat_config(
         "openai_base_url": openai.get("base_url", ""),
         "openai_api_key": openai.get("api_key", ""),
         "openai_model": openai.get("model", "gpt-4o-mini"),
-        "default_kb_name": defaults.get("kb_name", ""),
     }
 
 
@@ -230,23 +274,7 @@ def load_config(
     profile: str | None = None,
     start_dir: Path | None = None,
 ) -> dict[str, Any]:
-    selected_path = resolve_config_path(config_path)
-
-    if not selected_path.exists():
-        raise ConfigError(f"配置文件不存在: {selected_path}")
-
-    raw_text = read_text_file(selected_path)
-    if not raw_text:
-        raise ConfigError(f"配置文件为空: {selected_path}")
-
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise ConfigError(f"配置文件 JSON 非法: {selected_path}; {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise ConfigError(f"配置文件必须是 JSON 对象: {selected_path}")
-
+    data, selected_path = load_raw_config(config_path)
     return _to_flat_config(data, profile, selected_path, start_dir)
 
 

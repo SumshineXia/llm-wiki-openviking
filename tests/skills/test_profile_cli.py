@@ -164,3 +164,31 @@ def test_profile_bind_and_unbind(tmp_path: Path) -> None:
     unbound = _run(["--config", str(config_path), "unbind", "--dir", str(bind_dir)], tmp_path, env)
     assert unbound["removed"] is True
     assert not (bind_dir / ".llm-wiki-profile").exists()
+
+
+def test_profile_cli_rejects_deprecated_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "old-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "profile": "p1",
+                        "system": {"name": "System 1", "ipmp_system_num": "IPMP-1"},
+                        "openviking": {"url": "http://p1:1933"},
+                        "defaults": {"kb_name": "old-default"}
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = _make_env(tmp_path)
+
+    exit_code, payload = _run_allow_fail(["--config", str(config_path), "list"], tmp_path, env)
+
+    assert exit_code == 1
+    assert payload["status"] == "error"
+    assert "ConfigError" in payload.get("error_type", "")
+    assert "已废弃字段 defaults" in payload.get("error", "")

@@ -34,7 +34,7 @@ def _write_v2_config(path: Path) -> None:
                 "profiles": [
                     {
                         "profile": "p1",
-                        "system": {"id": "s1", "name": "System 1", "ipmp_system_num": "IPMP-1"},
+                        "system": {"name": "System 1", "ipmp_system_num": "IPMP-1"},
                         "openviking": {
                             "url": "http://p1-host:1933",
                             "api_key": "p1-key",
@@ -47,11 +47,10 @@ def _write_v2_config(path: Path) -> None:
                             "api_key": "p1-openai-key",
                             "model": "p1-model",
                         },
-                        "defaults": {"kb_name": "kb-p1"},
                     },
                     {
                         "profile": "p2",
-                        "system": {"id": "s2", "name": "System 2", "ipmp_system_num": "IPMP-2"},
+                        "system": {"name": "System 2", "ipmp_system_num": "IPMP-2"},
                         "openviking": {
                             "url": "http://p2-host:1933",
                             "api_key": "p2-key",
@@ -64,7 +63,6 @@ def _write_v2_config(path: Path) -> None:
                             "api_key": "p2-openai-key",
                             "model": "p2-model",
                         },
-                        "defaults": {"kb_name": "kb-p2"},
                     },
                 ],
             }
@@ -172,7 +170,6 @@ def test_load_config_uses_file_values_over_env(tmp_path: Path, monkeypatch) -> N
             "openai_base_url": "https://file-openai.local",
             "openai_api_key": "file-openai-key",
             "openai_model": "file-model",
-            "default_kb_name": "file-kb",
         }),
         encoding="utf-8",
     )
@@ -334,3 +331,143 @@ def test_load_config_timeout_cast_to_float(tmp_path: Path, monkeypatch) -> None:
 
     assert config["openviking_timeout"] == 22.0
     assert isinstance(config["openviking_timeout"], float)
+
+
+def test_load_config_v2_without_system_id_and_defaults(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch, tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "profile": "p1",
+                        "system": {"name": "System 1", "ipmp_system_num": "IPMP-1"},
+                        "openviking": {
+                            "url": "http://p1-host:1933",
+                            "api_key": "p1-key",
+                            "account_id": "p1-account",
+                            "user_id": "p1-user",
+                            "timeout": 11
+                        },
+                        "openai": {
+                            "base_url": "https://p1-openai.local",
+                            "api_key": "p1-openai-key",
+                            "model": "p1-model"
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(str(config_path))
+
+    assert config["profile"] == "p1"
+    assert "system_id" not in config
+    assert "default_kb_name" not in config
+    assert config["system_name"] == "System 1"
+    assert config["ipmp_system_num"] == "IPMP-1"
+    assert config["openviking_url"] == "http://p1-host:1933"
+
+
+def test_load_config_rejects_deprecated_flat_defaults(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch, tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "openviking_url": "http://file-host:1933",
+                "defaults": {
+                    "kb_name": "old-default"
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 defaults"):
+        load_config(str(config_path))
+
+
+def test_load_config_rejects_deprecated_flat_default_kb_name(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch, tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "openviking_url": "http://file-host:1933",
+                "default_kb_name": "old-default"
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 default_kb_name"):
+        load_config(str(config_path))
+
+
+def test_load_config_rejects_deprecated_flat_system_id(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch, tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "openviking_url": "http://file-host:1933",
+                "system_id": "old-system"
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 system_id"):
+        load_config(str(config_path))
+
+
+def test_load_config_rejects_deprecated_v2_system_id(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch, tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "profile": "p1",
+                        "system": {"id": "s1", "name": "System 1", "ipmp_system_num": "IPMP-1"},
+                        "openviking": {"url": "http://p1-host:1933"}
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 id"):
+        load_config(str(config_path))
+
+
+def test_load_config_rejects_deprecated_v2_defaults(tmp_path: Path, monkeypatch) -> None:
+    _clear_env(monkeypatch, tmp_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "profile": "p1",
+                        "system": {"name": "System 1", "ipmp_system_num": "IPMP-1"},
+                        "openviking": {"url": "http://p1-host:1933"},
+                        "defaults": {"kb_name": "old-default"}
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="已废弃字段 defaults"):
+        load_config(str(config_path))
