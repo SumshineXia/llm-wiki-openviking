@@ -172,39 +172,260 @@ def extract_uri_from_ls_item(item: Any) -> str | None:
     return None
 
 
-def list_markdown_pages(client: OVFSClient, root_uri: str) -> List[str]:
-    try:
-        items = client.ls(root_uri, recursive=True)
-    except Exception:
-        return []
+def extract_child_is_dir_hint(item: Any) -> bool | None:
+    if not isinstance(item, dict):
+        return None
 
-    uris: List[str] = []
-    for item in items:
+    if isinstance(item.get("isDir"), bool):
+        return item["isDir"]
+
+    if isinstance(item.get("is_dir"), bool):
+        return item["is_dir"]
+
+    item_type = str(item.get("type", "")).lower()
+    if item_type in {"dir", "directory", "folder"}:
+        return True
+    if item_type in {"file"}:
+        return False
+
+    return None
+
+
+class LintLinkResolutionIndex:
+    def __init__(
+        self,
+        file_rel_to_uri: Dict[str, str],
+        dir_rels: Set[str],
+        direct_markdown_children_by_dir: Dict[str, List[str]],
+    ) -> None:
+        self.file_rel_to_uri = file_rel_to_uri
+        self.dir_rels = dir_rels
+        self.direct_markdown_children_by_dir = direct_markdown_children_by_dir
+
+
+def parent_rel_path(rel: str) -> str:
+    parent = str(PurePosixPath(rel).parent)
+    return "" if parent == "." else parent
+
+
+def build_link_resolution_index(
+    kb_root: str,
+    wiki_tree_items: List[Any],
+    page_uris: List[str],
+) -> LintLinkResolutionIndex:
+    wiki_root = kb_root + "wiki/"
+
+    file_rel_to_uri: Dict[str, str] = {}
+    dir_rels: Set[str] = set()
+    all_rels_in_tree: List[str] = []
+
+    for item in wiki_tree_items:
         uri = extract_uri_from_ls_item(item)
-        if not uri:
+        if not uri or not isinstance(uri, str):
             continue
-        if not uri.startswith("viking://"):
+        if not uri.startswith(wiki_root):
             continue
 
-        if isinstance(item, dict) and isinstance(item.get("isDir"), bool):
-            is_dir = item["isDir"]
-        else:
-            stat = get_uri_stat(client, uri)
-            is_dir = bool(stat and stat.get("isDir", False))
-
-        if is_dir:
+        rel = wiki_relative_path(kb_root, uri).strip("/")
+        if not rel:
             continue
-        if uri.endswith(".md"):
-            uris.append(uri)
 
-    seen: Set[str] = set()
-    deduped: List[str] = []
-    for uri in uris:
-        if uri not in seen:
-            seen.add(uri)
-            deduped.append(uri)
+        all_rels_in_tree.append(rel)
 
-    return deduped
+        is_dir = extract_child_is_dir_hint(item)
+        if is_dir is True:
+            dir_rels.add(rel)
+        elif is_dir is False and rel.endswith(".md"):
+            file_rel_to_uri.setdefault(rel, uri)
+
+    for uri in page_uris:
+        if not uri.startswith(wiki_root):
+            continue
+        rel = wiki_relative_path(kb_root, uri).strip("/")
+        if rel and rel.endswith(".md"):
+            file_rel_to_uri.setdefault(rel, uri)
+            all_rels_in_tree.append(rel)
+
+    for rel in all_rels_in_tree:
+        parts = [part for part in PurePosixPath(rel).parts if part not in ("", ".")]
+        for index in range(1, len(parts)):
+            dir_rels.add(PurePosixPath(*parts[:index]).as_posix())
+
+    direct_markdown_children_by_dir: Dict[str, List[str]] = {}
+    for rel in file_rel_to_uri.keys():
+        parent = parent_rel_path(rel)
+        if not parent:
+            continue
+        direct_markdown_children_by_dir.setdefault(parent, []).append(rel)
+
+    return LintLinkResolutionIndex(
+        file_rel_to_uri=file_rel_to_uri,
+        dir_rels=dir_rels,
+        direct_markdown_children_by_dir=direct_markdown_children_by_dir,
+    )
+
+
+def build_link_resolution_index_from_page_map(
+    kb_root: str,
+    page_map: Dict[str, str],
+) -> LintLinkResolutionIndex:
+    return build_link_resolution_index(kb_root, [], list(page_map.keys()))
+
+
+def select_direct_content_child_from_index(
+    link_index: LintLinkResolutionIndex,
+    dir_rel: str,
+) -> str | None:
+    children = [
+        child_rel
+        for child_rel in link_index.direct_markdown_children_by_dir.get(dir_rel, [])
+        if child_rel.endswith(".md")
+        and PurePosixPath(child_rel).name != "abstract.md"
+    ]
+
+    if not children:
+        return None
+
+    parent_name = PurePosixPath(dir_rel.rstrip("/")).name
+
+    for child_rel in children:
+        if PurePosixPath(child_rel).name == parent_name:
+            return child_rel
+
+    for child_rel in children:
+        if PurePosixPath(child_rel).name.startswith("tmp"):
+            return child_rel
+
+    return children[0]
+
+
+def resolve_canonical_markdown_uri_from_index(
+    kb_root: str,
+    link_index: LintLinkResolutionIndex,
+    uri: str,
+) -> str | None:
+    wiki_root = kb_root + "wiki/"
+    if not uri.startswith(wiki_root):
+        return None
+
+    rel = wiki_relative_path(kb_root, uri).strip("/")
+    if not rel:
+        return None
+
+    actual_file_uri = link_index.file_rel_to_uri.get(rel)
+    if actual_file_uri:
+        return actual_file_uri
+
+    if rel not in link_index.dir_rels:
+        return None
+
+    direct_child_rel = select_direct_content_child_from_index(link_index, rel)
+    if direct_child_rel:
+        return link_index.file_rel_to_uri.get(direct_child_rel)
+
+    basename = PurePosixPath(rel.rstrip("/")).name
+    if basename:
+        nested_rel = PurePosixPath(rel, basename).as_posix()
+        nested_uri = link_index.file_rel_to_uri.get(nested_rel)
+        if nested_uri:
+            return nested_uri
+
+    return None
+
+
+def resolve_internal_link_target_from_index(
+    kb_root: str,
+    source_page_uri: str,
+    rel_target: str,
+    link_index: LintLinkResolutionIndex,
+) -> str | None:
+    candidates = build_candidate_target_uris(kb_root, source_page_uri, rel_target)
+
+    for candidate in candidates:
+        canonical = resolve_canonical_markdown_uri_from_index(kb_root, link_index, candidate)
+        if canonical:
+            return canonical
+
+    return None
+
+
+def build_internal_link_graph(
+    kb_root: str,
+    page_map: Dict[str, str],
+    link_index: LintLinkResolutionIndex,
+) -> tuple[Dict[str, Set[str]], List[Dict[str, str]]]:
+    graph: Dict[str, Set[str]] = {uri: set() for uri in page_map.keys()}
+    broken: List[Dict[str, str]] = []
+
+    for source_uri, text in page_map.items():
+        for rel_target in sorted(extract_internal_links(text)):
+            target_uri = resolve_internal_link_target_from_index(
+                kb_root,
+                source_uri,
+                rel_target,
+                link_index,
+            )
+
+            if target_uri:
+                graph.setdefault(source_uri, set()).add(target_uri)
+            else:
+                broken.append(
+                    {
+                        "source_uri": source_uri,
+                        "target": rel_target,
+                    }
+                )
+
+    return graph, broken
+
+
+def list_wiki_tree_items(client: OVFSClient, wiki_root: str) -> List[Any]:
+  try:
+    return client.ls(wiki_root, recursive=True)
+  except Exception:
+    return []
+
+
+def list_markdown_pages_from_items(
+  client: OVFSClient,
+  root_uri: str,
+  items: List[Any],
+) -> List[str]:
+  del root_uri
+
+  uris: List[str] = []
+
+  for item in items:
+    uri = extract_uri_from_ls_item(item)
+    if not uri:
+      continue
+    if not isinstance(uri, str) or not uri.startswith("viking://"):
+      continue
+
+    is_dir = extract_child_is_dir_hint(item)
+    if is_dir is None:
+      stat = get_uri_stat(client, uri)
+      is_dir = bool(stat and stat.get("isDir", False))
+
+    if is_dir:
+      continue
+
+    if uri.endswith(".md"):
+      uris.append(uri)
+
+  seen: Set[str] = set()
+  deduped: List[str] = []
+  for uri in uris:
+    if uri not in seen:
+      seen.add(uri)
+      deduped.append(uri)
+
+  return deduped
+
+
+def list_markdown_pages(client: OVFSClient, root_uri: str) -> List[str]:
+  items = list_wiki_tree_items(client, root_uri)
+  return list_markdown_pages_from_items(client, root_uri, items)
 
 
 def check_unexpected_wiki_root_entries(client: OVFSClient, kb_root: str) -> List[str]:
@@ -369,26 +590,18 @@ def check_broken_links(
     client: OVFSClient,
     kb_root: str,
     page_map: Dict[str, str],
+    link_index: LintLinkResolutionIndex | None = None,
+    precomputed_broken_links: List[Dict[str, str]] | None = None,
 ) -> List[Dict[str, str]]:
-    broken: List[Dict[str, str]] = []
+    del client
 
-    for source_uri, text in page_map.items():
-        for rel_target in sorted(extract_internal_links(text)):
-            candidates = build_candidate_target_uris(kb_root, source_uri, rel_target)
-            found = False
-            for candidate in candidates:
-                canonical = resolve_canonical_markdown_uri(client, candidate)
-                if canonical:
-                    found = True
-                    break
-            if not found:
-                broken.append(
-                    {
-                        "source_uri": source_uri,
-                        "target": rel_target,
-                    }
-                )
+    if precomputed_broken_links is not None:
+        return precomputed_broken_links
 
+    if link_index is None:
+        link_index = build_link_resolution_index_from_page_map(kb_root, page_map)
+
+    _, broken = build_internal_link_graph(kb_root, page_map, link_index)
     return broken
 
 
@@ -396,17 +609,23 @@ def check_orphan_pages(
     client: OVFSClient,
     kb_root: str,
     page_map: Dict[str, str],
+    link_index: LintLinkResolutionIndex | None = None,
+    link_graph: Dict[str, Set[str]] | None = None,
 ) -> List[str]:
+    del client
+
+    if link_index is None:
+        link_index = build_link_resolution_index_from_page_map(kb_root, page_map)
+
+    if link_graph is None:
+        link_graph, _ = build_internal_link_graph(kb_root, page_map, link_index)
+
     inbound_counts: Dict[str, int] = {uri: 0 for uri in page_map.keys()}
 
-    for source_uri, text in page_map.items():
-        for rel_target in extract_internal_links(text):
-            candidates = build_candidate_target_uris(kb_root, source_uri, rel_target)
-            for candidate in candidates:
-                canonical = resolve_canonical_markdown_uri(client, candidate)
-                if canonical and canonical in inbound_counts:
-                    inbound_counts[canonical] += 1
-                    break
+    for target_uris in link_graph.values():
+        for target_uri in target_uris:
+            if target_uri in inbound_counts:
+                inbound_counts[target_uri] += 1
 
     orphans: List[str] = []
     for uri, count in inbound_counts.items():
@@ -465,110 +684,119 @@ def check_stub_pages(page_map: Dict[str, str]) -> List[str]:
     return sorted(stubs)
 
 
+def check_nested_resource_dirs_from_items(kb_root: str, items: List[Any]) -> List[str]:
+  wiki_uri = kb_root + "wiki/"
+  nested_dirs: List[str] = []
+
+  for item in items:
+    uri = extract_uri_from_ls_item(item)
+
+    if not uri or not isinstance(uri, str):
+      continue
+    if not uri.startswith(kb_root):
+      continue
+
+    rel_from_wiki = uri[len(wiki_uri):]
+    parts = [p for p in rel_from_wiki.split("/") if p]
+    if len(parts) < 2:
+      continue
+
+    for i in range(len(parts) - 1):
+      if parts[i] == parts[i + 1]:
+        nested_dirs.append(uri)
+        break
+
+  return sorted(set(nested_dirs))
+
+
 def check_nested_resource_dirs(client: OVFSClient, kb_root: str) -> List[str]:
-    wiki_uri = kb_root + "wiki/"
-    try:
-        items = client.ls(wiki_uri, recursive=True)
-    except Exception:
-        return []
-
-    nested_dirs: List[str] = []
-
-    for item in items:
-        uri: Optional[str] = None
-
-        if isinstance(item, str):
-            uri = item
-        elif isinstance(item, dict):
-            uri = item.get("uri") or item.get("path")
-
-        if not uri or not isinstance(uri, str):
-            continue
-        if not uri.startswith(kb_root):
-            continue
-
-        rel_from_wiki = uri[len(wiki_uri):]
-
-        parts = [p for p in rel_from_wiki.split("/") if p]
-        if len(parts) < 2:
-            continue
-
-        for i in range(len(parts) - 1):
-            if parts[i] == parts[i + 1]:
-                nested_dirs.append(uri)
-                break
-
-    return sorted(set(nested_dirs))
+  wiki_uri = kb_root + "wiki/"
+  items = list_wiki_tree_items(client, wiki_uri)
+  return check_nested_resource_dirs_from_items(kb_root, items)
 
 
 def build_report(client: OVFSClient, kb_root: str) -> Dict[str, Any]:
-    all_pages = list_markdown_pages(client, kb_root + "wiki/")
-    unexpected_wiki_root_entries = check_unexpected_wiki_root_entries(client, kb_root)
-    page_map: Dict[str, str] = {}
+  wiki_root = kb_root + "wiki/"
+  wiki_tree_items = list_wiki_tree_items(client, wiki_root)
 
-    for uri in all_pages:
-        try:
-            page_map[uri] = client.read_text(uri)
-        except Exception:
-            page_map[uri] = ""
+  all_pages = list_markdown_pages_from_items(client, wiki_root, wiki_tree_items)
+  unexpected_wiki_root_entries = check_unexpected_wiki_root_entries(client, kb_root)
 
-    broken_links = check_broken_links(client, kb_root, page_map)
-    orphan_pages = check_orphan_pages(client, kb_root, page_map)
-    no_outbound_links = check_pages_without_outbound_links(kb_root, page_map)
-    duplicate_titles = check_duplicate_titles(page_map)
-    stub_pages = check_stub_pages(page_map)
-    _nested_dirs = check_nested_resource_dirs(client, kb_root)
+  link_index = build_link_resolution_index(kb_root, wiki_tree_items, all_pages)
 
-    errors: List[str] = []
-    warnings: List[str] = []
+  page_map: Dict[str, str] = {}
+  for uri in all_pages:
+    try:
+      page_map[uri] = client.read_text(uri)
+    except Exception:
+      page_map[uri] = ""
 
-    if broken_links:
-        errors.append(f"内部链接失效：{len(broken_links)}")
+  link_graph, broken_links = build_internal_link_graph(kb_root, page_map, link_index)
 
-    if unexpected_wiki_root_entries:
-        errors.append(f"wiki 根目录存在非预期条目：{len(unexpected_wiki_root_entries)}")
+  orphan_pages = check_orphan_pages(
+    client,
+    kb_root,
+    page_map,
+    link_index=link_index,
+    link_graph=link_graph,
+  )
 
-    if orphan_pages:
-        warnings.append(f"孤立页面：{len(orphan_pages)}")
+  no_outbound_links = check_pages_without_outbound_links(kb_root, page_map)
+  duplicate_titles = check_duplicate_titles(page_map)
+  stub_pages = check_stub_pages(page_map)
+  _nested_dirs = check_nested_resource_dirs_from_items(kb_root, wiki_tree_items)
+  del _nested_dirs
 
-    if no_outbound_links:
-        warnings.append(f"缺少出站内部链接的页面：{len(no_outbound_links)}")
+  errors: List[str] = []
+  warnings: List[str] = []
 
-    if duplicate_titles:
-        warnings.append(f"页面标题重复：{len(duplicate_titles)}")
+  if broken_links:
+    errors.append(f"内部链接失效：{len(broken_links)}")
 
-    if stub_pages:
-        warnings.append(f"占位或近似空页面：{len(stub_pages)}")
+  if unexpected_wiki_root_entries:
+    errors.append(f"wiki 根目录存在非预期条目：{len(unexpected_wiki_root_entries)}")
 
-    status = "ok"
-    if errors:
-        status = "error"
-    elif warnings:
-        status = "warn"
+  if orphan_pages:
+    warnings.append(f"孤立页面：{len(orphan_pages)}")
 
-    return {
-        "status": status,
-        "kb_root": kb_root,
-        "summary": {
-            "total_pages": len(all_pages),
-            "unexpected_wiki_root_entries": len(unexpected_wiki_root_entries),
-            "broken_links": len(broken_links),
-            "orphan_pages": len(orphan_pages),
-            "pages_without_outbound_links": len(no_outbound_links),
-            "duplicate_titles": len(duplicate_titles),
-            "stub_pages": len(stub_pages),
-        },
-        "errors": errors,
-        "warnings": warnings,
-        "details": {
-            "unexpected_wiki_root_entries": unexpected_wiki_root_entries,
-            "broken_links": broken_links,
-            "orphan_pages": orphan_pages,
-            "pages_without_outbound_links": no_outbound_links,
-            "duplicate_titles": duplicate_titles,
-            "stub_pages": stub_pages,
-        },
-    }
+  if no_outbound_links:
+    warnings.append(f"缺少出站内部链接的页面：{len(no_outbound_links)}")
+
+  if duplicate_titles:
+    warnings.append(f"页面标题重复：{len(duplicate_titles)}")
+
+  if stub_pages:
+    warnings.append(f"占位或近似空页面：{len(stub_pages)}")
+
+  status = "ok"
+  if errors:
+    status = "error"
+  elif warnings:
+    status = "warn"
+
+  return {
+    "status": status,
+    "kb_root": kb_root,
+    "summary": {
+      "total_pages": len(all_pages),
+      "unexpected_wiki_root_entries": len(unexpected_wiki_root_entries),
+      "broken_links": len(broken_links),
+      "orphan_pages": len(orphan_pages),
+      "pages_without_outbound_links": len(no_outbound_links),
+      "duplicate_titles": len(duplicate_titles),
+      "stub_pages": len(stub_pages),
+    },
+    "errors": errors,
+    "warnings": warnings,
+    "details": {
+      "unexpected_wiki_root_entries": unexpected_wiki_root_entries,
+      "broken_links": broken_links,
+      "orphan_pages": orphan_pages,
+      "pages_without_outbound_links": no_outbound_links,
+      "duplicate_titles": duplicate_titles,
+      "stub_pages": stub_pages,
+    },
+  }
 
 
 def parse_args() -> argparse.Namespace:
